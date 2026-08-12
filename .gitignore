@@ -49,3 +49,27 @@ po/*~
 rsconnect/
 .DS_Store
 .DS_Store
+
+# macOS
+.DS_Store
+
+# STAV confidential / raw data
+data/
+raw_data/
+private_data/
+
+# Data exports
+*.csv
+*.tsv
+*.json
+
+# Excel data files
+*.xlsx
+*.xls
+
+# Temporary files
+*.tmp
+*.log
+
+
+
