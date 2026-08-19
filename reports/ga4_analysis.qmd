@@ -1,0 +1,1627 @@
+---
+title: "STAV GA4 Website Analytics"
+format: html
+editor: visual
+---
+
+```{r}
+library(tidyverse)
+library(here)
+library(janitor)
+```
+
+## 1. Data Import
+
+The GA4 exports contain nine metadata rows before the column headings. These
+rows are skipped when the files are imported.
+
+```{r}
+demographic <- read_csv(
+  here("data", "raw", "GA4", "Demographic_details_Country.csv"),
+  skip = 9,
+  show_col_types = FALSE
+)
+
+events <- read_csv(
+  here("data", "raw", "GA4", "Events_Event_name.csv"),
+  skip = 9,
+  show_col_types = FALSE
+)
+
+landing_page <- read_csv(
+  here("data", "raw", "GA4", "Landing_page_Landing_page.csv"),
+  skip = 9,
+  show_col_types = FALSE
+)
+
+pages <- read_csv(
+  here("data", "raw", "GA4", "Pages_and_screens_Page_path_and_screen_class.csv"),
+  skip = 9,
+  show_col_types = FALSE
+)
+
+traffic <- read_csv(
+  here(
+    "data", "raw", "GA4",
+    "Traffic_acquisition_Session_primary_channel_group_(Default_Channel_Group).csv"
+  ),
+  skip = 9,
+  show_col_types = FALSE
+)
+```
+
+## 2. Data Structure
+
+Standardise all column names to snake case before carrying out validation or
+analysis.
+
+```{r}
+demographic <- demographic |> clean_names()
+events <- events |> clean_names()
+landing_page <- landing_page |> clean_names()
+pages <- pages |> clean_names()
+traffic <- traffic |> clean_names()
+```
+
+```{r}
+ga4_structure <- tibble(
+  dataset = c("demographic", "events", "landing_page", "pages", "traffic"),
+  rows = c(
+    nrow(demographic), nrow(events), nrow(landing_page),
+    nrow(pages), nrow(traffic)
+  ),
+  columns = c(
+    ncol(demographic), ncol(events), ncol(landing_page),
+    ncol(pages), ncol(traffic)
+  )
+)
+
+ga4_structure
+```
+
+```{r}
+list(
+  demographic = names(demographic),
+  events = names(events),
+  landing_page = names(landing_page),
+  pages = names(pages),
+  traffic = names(traffic)
+)
+```
+
+## 3. Initial Data Validation
+
+These checks report possible issues but do not remove or modify observations.
+
+```{r}
+ga4_data <- list(
+  demographic = demographic,
+  events = events,
+  landing_page = landing_page,
+  pages = pages,
+  traffic = traffic
+)
+
+ga4_validation <- imap_dfr(
+  ga4_data,
+  ~ tibble(
+    dataset = .y,
+    rows = nrow(.x),
+    columns = ncol(.x),
+    missing_values = sum(is.na(.x)),
+    duplicate_rows = sum(duplicated(.x))
+  )
+)
+
+ga4_validation
+```
+
+## 4. Events Data Audit
+
+Review the events currently collected in GA4 and assess whether meaningful
+website conversions are being tracked.
+
+Classify the recorded events into standard GA4 activity, content interactions
+and potential business conversions. This classification supports the audit; it
+does not alter the original event names or counts.
+
+```{r}
+events_audit <- events |>
+  mutate(
+    event_category = case_when(
+      event_name %in% c(
+        "page_view",
+        "session_start",
+        "first_visit",
+        "user_engagement",
+        "scroll"
+      ) ~ "Automatically collected or enhanced measurement",
+
+      str_detect(
+        event_name,
+        regex(
+          "form|register|registration|sign_up|purchase|member",
+          ignore_case = TRUE
+        )
+      ) ~ "Potential business conversion",
+
+      str_detect(
+        event_name,
+        regex(
+          "click|download|file|video",
+          ignore_case = TRUE
+        )
+      ) ~ "Content interaction",
+
+      TRUE ~ "Other"
+    ),
+
+    tracking_status = case_when(
+      event_category == "Potential business conversion" ~
+        "Review whether this should be a key event",
+
+      event_category ==
+        "Automatically collected or enhanced measurement" ~
+        "Standard GA4 event",
+
+      TRUE ~ "Review event definition"
+    )
+  ) |>
+  arrange(desc(event_count))
+
+events_audit |>
+  select(
+    event_name,
+    event_count,
+    total_users,
+    event_category,
+    tracking_status
+  )
+```
+
+Search for events whose names suggest a registration, form submission,
+membership action or other business conversion.
+
+```{r}
+potential_conversion_events <- events_audit |>
+  filter(
+    str_detect(
+      event_name,
+      regex(
+        "form|register|registration|sign_up|purchase|member",
+        ignore_case = TRUE
+      )
+    )
+  )
+
+potential_conversion_events
+```
+
+Summarise the recorded event activity by audit category. The user counts below
+must not be interpreted as distinct users across categories because the same
+person can trigger more than one event type.
+
+```{r}
+event_category_summary <- events_audit |>
+  group_by(event_category) |>
+  summarise(
+    number_of_event_types = n(),
+    total_event_count = sum(event_count, na.rm = TRUE),
+    total_users_across_event_rows = sum(total_users, na.rm = TRUE),
+    .groups = "drop"
+  ) |>
+  arrange(desc(total_event_count))
+
+event_category_summary
+```
+
+Record the principal data-quality checks for the events export.
+
+```{r}
+events_findings <- tibble(
+  check = c(
+    "Number of event types",
+    "Missing event names",
+    "Duplicate event names",
+    "Potential conversion events",
+    "Event types with zero counts"
+  ),
+  result = c(
+    nrow(events),
+    sum(is.na(events$event_name) | events$event_name == ""),
+    sum(duplicated(events$event_name)),
+    nrow(potential_conversion_events),
+    sum(events$event_count == 0, na.rm = TRUE)
+  )
+)
+
+events_findings
+```
+
+## 5. Traffic Acquisition Data Audit
+
+Review the channels through which users reached the STAV website and assess
+whether campaign traffic is being classified reliably.
+
+```{r}
+traffic_audit <- traffic |>
+  rename(
+    channel =
+      session_primary_channel_group_default_channel_group
+  ) |>
+  mutate(
+    session_share =
+      sessions / sum(sessions, na.rm = TRUE),
+
+    engagement_rate_check =
+      engaged_sessions / sessions,
+
+    engagement_rate_difference =
+      abs(engagement_rate - engagement_rate_check),
+
+    channel_flag = case_when(
+      channel == "Direct" ~
+        "Review possible untagged campaign traffic",
+
+      channel == "Unassigned" ~
+        "Traffic source could not be classified",
+
+      channel == "Email" & sessions < 10 ~
+        "Email traffic may be under-recorded",
+
+      key_events == 0 ~
+        "No key events recorded",
+
+      TRUE ~
+        "No immediate issue identified"
+    )
+  ) |>
+  arrange(desc(sessions))
+
+traffic_audit |>
+  select(
+    channel,
+    sessions,
+    session_share,
+    engagement_rate,
+    average_engagement_time_per_session,
+    key_events,
+    channel_flag
+  )
+```
+
+Check the internal consistency and validity of the traffic-acquisition data.
+
+```{r}
+traffic_validation <- tibble(
+  check = c(
+    "Missing channel names",
+    "Duplicate channel names",
+    "Negative session values",
+    "Engaged sessions greater than sessions",
+    "Engagement rates outside 0-1",
+    "Engagement-rate calculation differences",
+    "Channels with zero key events"
+  ),
+
+  result = c(
+    sum(
+      is.na(traffic_audit$channel) |
+        traffic_audit$channel == ""
+    ),
+
+    sum(duplicated(traffic_audit$channel)),
+
+    sum(traffic_audit$sessions < 0, na.rm = TRUE),
+
+    sum(
+      traffic_audit$engaged_sessions >
+        traffic_audit$sessions,
+      na.rm = TRUE
+    ),
+
+    sum(
+      traffic_audit$engagement_rate < 0 |
+        traffic_audit$engagement_rate > 1,
+      na.rm = TRUE
+    ),
+
+    sum(
+      traffic_audit$engagement_rate_difference >
+        0.000001,
+      na.rm = TRUE
+    ),
+
+    sum(traffic_audit$key_events == 0, na.rm = TRUE)
+  )
+)
+
+traffic_validation
+```
+
+Calculate overall traffic totals. The overall engagement rate is weighted by
+sessions rather than calculated as a simple average of channel rates.
+
+```{r}
+traffic_summary <- traffic_audit |>
+  summarise(
+    total_sessions =
+      sum(sessions, na.rm = TRUE),
+
+    total_engaged_sessions =
+      sum(engaged_sessions, na.rm = TRUE),
+
+    overall_engagement_rate =
+      total_engaged_sessions / total_sessions,
+
+    total_event_count =
+      sum(event_count, na.rm = TRUE),
+
+    total_key_events =
+      sum(key_events, na.rm = TRUE)
+  )
+
+traffic_summary
+```
+
+Quantify traffic categories that may indicate incomplete campaign tagging.
+These results identify areas for investigation; they do not prove that Direct
+traffic originated from a particular campaign.
+
+```{r}
+tracking_risk_summary <- traffic_audit |>
+  summarise(
+    direct_sessions =
+      sum(sessions[channel == "Direct"], na.rm = TRUE),
+
+    direct_share =
+      sum(session_share[channel == "Direct"], na.rm = TRUE),
+
+    unassigned_sessions =
+      sum(sessions[channel == "Unassigned"], na.rm = TRUE),
+
+    unassigned_share =
+      sum(session_share[channel == "Unassigned"], na.rm = TRUE),
+
+    email_sessions =
+      sum(sessions[channel == "Email"], na.rm = TRUE),
+
+    email_share =
+      sum(session_share[channel == "Email"], na.rm = TRUE)
+  )
+
+tracking_risk_summary
+```
+
+## 6. Landing Page Data Audit
+
+Review the pages through which sessions entered the STAV website and identify
+path-formatting issues, unclassified landing pages and pages that may require
+further investigation. The original landing-page field is retained unchanged.
+
+```{r}
+landing_page_audit <- landing_page |>
+  mutate(
+    landing_page_original = landing_page,
+
+    has_query_parameter =
+      str_detect(landing_page, fixed("?")),
+
+    landing_page_standardised = landing_page |>
+      str_squish() |>
+      str_remove("\\?.*$"),
+
+    landing_page_standardised = case_when(
+      landing_page_standardised == "/" ~ "/",
+      landing_page_standardised == "(not set)" ~ "(not set)",
+      TRUE ~ str_remove(landing_page_standardised, "/+$")
+    ),
+
+    landing_page_flag = case_when(
+      is.na(landing_page) | landing_page == "" ~
+        "Missing landing-page value",
+
+      landing_page == "(not set)" ~
+        "Landing page was not identified",
+
+      has_query_parameter ~
+        "Query parameters removed in standardised path",
+
+      landing_page != "/" & str_ends(landing_page, "/") ~
+        "Trailing slash removed in standardised path",
+
+      key_events == 0 ~
+        "No key events recorded",
+
+      TRUE ~
+        "No immediate issue identified"
+    )
+  ) |>
+  arrange(desc(sessions))
+
+landing_page_audit |>
+  select(
+    landing_page_original,
+    landing_page_standardised,
+    sessions,
+    active_users,
+    average_engagement_time_per_session,
+    key_events,
+    landing_page_flag
+  ) |>
+  slice_head(n = 20)
+```
+
+Check the structural quality of the landing-page export. Duplicate
+standardised paths indicate that multiple exported rows may refer to the same
+page after query parameters and trailing slashes are removed.
+
+```{r}
+standardised_landing_page_duplicates <- landing_page_audit |>
+  filter(landing_page_standardised != "(not set)") |>
+  count(
+    landing_page_standardised,
+    name = "number_of_rows"
+  ) |>
+  filter(number_of_rows > 1) |>
+  arrange(desc(number_of_rows))
+
+landing_page_validation <- tibble(
+  check = c(
+    "Missing landing-page values",
+    "Exact duplicate rows",
+    "Duplicate original landing-page paths",
+    "Rows recorded as (not set)",
+    "Paths containing query parameters",
+    "Non-root paths ending in a slash",
+    "Duplicated standardised paths",
+    "Rows with zero key events"
+  ),
+
+  result = c(
+    sum(
+      is.na(landing_page_audit$landing_page_original) |
+        landing_page_audit$landing_page_original == ""
+    ),
+
+    sum(duplicated(landing_page)),
+
+    sum(duplicated(landing_page$landing_page)),
+
+    sum(
+      landing_page_audit$landing_page_original == "(not set)",
+      na.rm = TRUE
+    ),
+
+    sum(landing_page_audit$has_query_parameter, na.rm = TRUE),
+
+    sum(
+      landing_page_audit$landing_page_original != "/" &
+        str_ends(landing_page_audit$landing_page_original, "/"),
+      na.rm = TRUE
+    ),
+
+    nrow(standardised_landing_page_duplicates),
+
+    sum(landing_page_audit$key_events == 0, na.rm = TRUE)
+  )
+)
+
+landing_page_validation
+```
+
+Quantify the scale of unidentified landing-page traffic and confirm the
+overall volume represented by this export.
+
+```{r}
+landing_page_summary <- landing_page_audit |>
+  summarise(
+    total_sessions = sum(sessions, na.rm = TRUE),
+
+    total_active_users_across_rows =
+      sum(active_users, na.rm = TRUE),
+
+    not_set_sessions =
+      sum(
+        sessions[landing_page_original == "(not set)"],
+        na.rm = TRUE
+      ),
+
+    not_set_session_share =
+      not_set_sessions / total_sessions,
+
+    total_key_events =
+      sum(key_events, na.rm = TRUE)
+  )
+
+landing_page_summary
+```
+
+Identify frequently used landing pages with very short average engagement
+time. These thresholds are screening rules for investigation rather than a
+formal definition of poor performance.
+
+```{r}
+high_traffic_low_engagement_pages <- landing_page_audit |>
+  filter(
+    landing_page_original != "(not set)",
+    sessions >= 100,
+    average_engagement_time_per_session < 10
+  ) |>
+  select(
+    landing_page_original,
+    sessions,
+    active_users,
+    average_engagement_time_per_session,
+    key_events
+  ) |>
+  arrange(
+    average_engagement_time_per_session,
+    desc(sessions)
+  )
+
+high_traffic_low_engagement_pages
+```
+
+Review standardised paths that correspond to more than one original exported
+row before deciding whether they should be aggregated for later analysis.
+
+```{r}
+standardised_landing_page_duplicates |>
+  slice_head(n = 20)
+```
+
+## 7. Pages and Screens Data Audit
+
+Review page-level website activity and identify path-formatting issues,
+possible tracking anomalies and content that may require further review. The
+original page path is retained, and the engagement metric is interpreted as
+average engagement time per active user rather than time per view.
+
+```{r}
+pages_audit <- pages |>
+  mutate(
+    page_path_original = page_path_and_screen_class,
+
+    has_query_parameter =
+      str_detect(page_path_original, fixed("?")),
+
+    page_path_standardised = page_path_original |>
+      str_squish() |>
+      str_remove("\\?.*$"),
+
+    page_path_standardised = case_when(
+      page_path_standardised == "/" ~ "/",
+      page_path_standardised == "(not set)" ~ "(not set)",
+      TRUE ~ str_remove(page_path_standardised, "/+$")
+    ),
+
+    page_path_template = page_path_standardised |>
+      str_replace_all(
+        "(/view-order/)\\d+",
+        "\\1{id}"
+      ) |>
+      str_replace_all(
+        "(/view-subscription/)\\d+",
+        "\\1{id}"
+      ) |>
+      str_replace_all(
+        "(/members-area/)\\d+",
+        "\\1{id}"
+      ) |>
+      str_replace_all(
+        "(/groups/)\\d+",
+        "\\1{id}"
+      ) |>
+      str_replace_all(
+        "(/join-group/)[A-Za-z0-9_-]{16,}",
+        "\\1{token}"
+      ),
+
+    page_path_was_templated =
+      page_path_template != page_path_standardised,
+
+    page_path_flag = case_when(
+      is.na(page_path_original) | page_path_original == "" ~
+        "Missing page path",
+
+      page_path_original == "(not set)" ~
+        "Page path was not identified",
+
+      has_query_parameter ~
+        "Query parameters removed in standardised path",
+
+      page_path_original != "/" &
+        str_ends(page_path_original, "/") ~
+        "Trailing slash removed in standardised path",
+
+      key_events == 0 ~
+        "No key events recorded",
+
+      TRUE ~
+        "No immediate issue identified"
+    )
+  ) |>
+  arrange(desc(views))
+
+pages_audit |>
+  select(
+    page_path_original,
+    page_path_standardised,
+    page_path_template,
+    views,
+    active_users,
+    views_per_active_user,
+    average_engagement_time_per_active_user,
+    key_events,
+    page_path_flag
+  ) |>
+  slice_head(n = 20)
+```
+
+Check page-path completeness, duplication and formatting. A duplicated
+standardised path means that multiple exported rows refer to the same path
+after query parameters and trailing slashes are removed.
+
+```{r}
+standardised_page_path_duplicates <- pages_audit |>
+  filter(page_path_standardised != "(not set)") |>
+  count(
+    page_path_standardised,
+    name = "number_of_rows"
+  ) |>
+  filter(number_of_rows > 1) |>
+  arrange(desc(number_of_rows))
+
+pages_validation <- tibble(
+  check = c(
+    "Missing page-path values",
+    "Exact duplicate rows",
+    "Duplicate original page paths",
+    "Rows recorded as (not set)",
+    "Paths containing query parameters",
+    "Non-root paths ending in a slash",
+    "Duplicated standardised paths",
+    "Rows with zero key events",
+    "Rows with negative numeric values",
+    "Rows with views below active users"
+  ),
+
+  result = c(
+    sum(
+      is.na(pages_audit$page_path_original) |
+        pages_audit$page_path_original == ""
+    ),
+
+    sum(duplicated(pages)),
+
+    sum(duplicated(pages$page_path_and_screen_class)),
+
+    sum(
+      pages_audit$page_path_original == "(not set)",
+      na.rm = TRUE
+    ),
+
+    sum(pages_audit$has_query_parameter, na.rm = TRUE),
+
+    sum(
+      pages_audit$page_path_original != "/" &
+        str_ends(pages_audit$page_path_original, "/"),
+      na.rm = TRUE
+    ),
+
+    nrow(standardised_page_path_duplicates),
+
+    sum(pages_audit$key_events == 0, na.rm = TRUE),
+
+    sum(
+      pages_audit |>
+        select(where(is.numeric)) |>
+        as.matrix() < 0,
+      na.rm = TRUE
+    ),
+
+    sum(pages_audit$views < pages_audit$active_users, na.rm = TRUE)
+  )
+)
+
+pages_validation
+```
+
+Reconcile total page views in the Pages and Screens export with the
+`page_view` count in the Events export. Any difference is retained and
+reported rather than manually adjusted.
+
+```{r}
+page_view_event_count <- events |>
+  filter(event_name == "page_view") |>
+  summarise(value = sum(event_count, na.rm = TRUE)) |>
+  pull(value)
+
+pages_summary <- pages_audit |>
+  summarise(
+    total_views = sum(views, na.rm = TRUE),
+
+    page_view_event_count = page_view_event_count,
+
+    view_count_difference =
+      total_views - page_view_event_count,
+
+    total_event_count_across_page_rows =
+      sum(event_count, na.rm = TRUE),
+
+    total_key_events =
+      sum(key_events, na.rm = TRUE)
+  )
+
+pages_summary
+```
+
+Identify frequently viewed pages with very short average engagement time per
+active user. These thresholds are screening rules and do not by themselves
+establish that a page performs poorly.
+
+```{r}
+high_view_low_engagement_pages <- pages_audit |>
+  filter(
+    page_path_original != "(not set)",
+    views >= 100,
+    average_engagement_time_per_active_user < 10
+  ) |>
+  select(
+    page_path_original,
+    views,
+    active_users,
+    views_per_active_user,
+    average_engagement_time_per_active_user,
+    key_events
+  ) |>
+  arrange(
+    average_engagement_time_per_active_user,
+    desc(views)
+  )
+
+high_view_low_engagement_pages
+```
+
+Review pages whose paths suggest membership, account, login or subscription
+activity. This is a path-based content grouping and does not identify users as
+members.
+
+```{r}
+member_related_pages <- pages_audit |>
+  filter(
+    str_detect(
+      page_path_original,
+      regex(
+        "my-account|member|membership|subscription|login|sts-resources",
+        ignore_case = TRUE
+      )
+    )
+  ) |>
+  select(
+    page_path_original,
+    views,
+    active_users,
+    views_per_active_user,
+    average_engagement_time_per_active_user,
+    key_events
+  ) |>
+  arrange(desc(views))
+
+member_related_pages |>
+  slice_head(n = 30)
+```
+
+### Dynamic Member-Path Templates
+
+For analytical reporting, replace confirmed dynamic member-area identifiers
+with placeholders. This creates an additional analysis field and does not
+change the original GA4 path or the website.
+
+```{r}
+page_template_validation <- pages_audit |>
+  summarise(
+    original_page_paths =
+      n_distinct(page_path_original),
+
+    standardised_page_paths =
+      n_distinct(page_path_standardised),
+
+    templated_page_paths =
+      n_distinct(page_path_template),
+
+    rows_changed_by_templating =
+      sum(page_path_was_templated, na.rm = TRUE),
+
+    distinct_standardised_paths_changed =
+      n_distinct(
+        page_path_standardised[page_path_was_templated]
+      ),
+
+    distinct_templates_created =
+      n_distinct(
+        page_path_template[page_path_was_templated]
+      )
+  )
+
+page_template_validation
+```
+
+Review how the original member-area paths map to the new templates.
+
+```{r}
+member_path_template_mapping <- pages_audit |>
+  filter(page_path_was_templated) |>
+  select(
+    page_path_original,
+    page_path_standardised,
+    page_path_template,
+    views,
+    event_count
+  ) |>
+  arrange(
+    page_path_template,
+    desc(views)
+  )
+
+member_path_template_mapping |>
+  slice_head(n = 40)
+```
+
+Aggregate additive activity measures by template. Active users are not summed
+because the same user may appear in more than one original path row.
+
+```{r}
+member_page_template_summary <- pages_audit |>
+  filter(page_path_was_templated) |>
+  group_by(page_path_template) |>
+  summarise(
+    original_path_rows = n(),
+    total_views = sum(views, na.rm = TRUE),
+    total_event_count = sum(event_count, na.rm = TRUE),
+    total_key_events = sum(key_events, na.rm = TRUE),
+    .groups = "drop"
+  ) |>
+  arrange(desc(total_views))
+
+member_page_template_summary |>
+  slice_head(n = 30)
+```
+
+Search for remaining member-area paths containing long tokens or numeric path
+segments that were not changed by the confirmed templating rules. These are
+review candidates, not values that should be automatically replaced.
+
+```{r}
+unresolved_dynamic_member_paths <- pages_audit |>
+  filter(
+    str_detect(
+      page_path_standardised,
+      regex("my-account|member|membership", ignore_case = TRUE)
+    ),
+    !page_path_was_templated,
+    str_detect(
+      page_path_standardised,
+      "(/\\d{4,})(/|$)|(/[A-Fa-f0-9]{16,})(/|$)"
+    )
+  ) |>
+  select(
+    page_path_original,
+    page_path_standardised,
+    views,
+    event_count
+  ) |>
+  arrange(desc(views))
+
+unresolved_dynamic_member_paths |>
+  slice_head(n = 30)
+```
+
+Review the most frequently duplicated standardised page paths before deciding
+whether to aggregate them for later analysis.
+
+```{r}
+standardised_page_path_duplicates |>
+  slice_head(n = 30)
+```
+
+## 8. Demographic Data Audit
+
+Review the geographic distribution of GA4 activity and identify countries
+whose volume and engagement patterns require further investigation. Review
+flags are screening rules only and do not establish that traffic is automated,
+invalid or irrelevant.
+
+```{r}
+demographic_audit <- demographic |>
+  mutate(
+    calculated_engaged_sessions_per_active_user =
+      engaged_sessions / active_users,
+
+    engaged_sessions_per_user_difference = abs(
+      engaged_sessions_per_active_user -
+        calculated_engaged_sessions_per_active_user
+    ),
+
+    new_user_ratio =
+      new_users / active_users,
+
+    low_engagement_rate_flag =
+      active_users >= 500 & engagement_rate < 0.15,
+
+    short_engagement_time_flag =
+      active_users >= 500 &
+        average_engagement_time_per_active_user < 10,
+
+    review_flag =
+      low_engagement_rate_flag |
+        short_engagement_time_flag,
+
+    review_reason = case_when(
+      low_engagement_rate_flag & short_engagement_time_flag ~
+        "High-volume country with low engagement rate and short engagement time",
+
+      low_engagement_rate_flag ~
+        "High-volume country with low engagement rate",
+
+      short_engagement_time_flag ~
+        "High-volume country with short engagement time",
+
+      TRUE ~
+        "No review flag under current screening rules"
+    )
+  ) |>
+  arrange(desc(active_users))
+
+demographic_audit |>
+  select(
+    country,
+    active_users,
+    new_users,
+    engaged_sessions,
+    engagement_rate,
+    average_engagement_time_per_active_user,
+    new_user_ratio,
+    review_flag,
+    review_reason
+  ) |>
+  slice_head(n = 20)
+```
+
+Check completeness, uniqueness, numeric validity and the internal calculation
+of engaged sessions per active user. New users can occasionally exceed active
+users because the GA4 metrics are defined differently, so these rows are
+reported for interpretation rather than treated as invalid records.
+
+```{r}
+demographic_validation <- tibble(
+  check = c(
+    "Missing country values",
+    "Duplicate country names",
+    "Rows with negative numeric values",
+    "Engagement rates outside 0-1",
+    "Engaged-sessions-per-user calculation differences",
+    "Rows with new users above active users",
+    "Countries meeting review rules"
+  ),
+
+  result = c(
+    sum(
+      is.na(demographic_audit$country) |
+        demographic_audit$country == ""
+    ),
+
+    sum(duplicated(demographic_audit$country)),
+
+    sum(
+      demographic_audit |>
+        select(
+          active_users,
+          new_users,
+          engaged_sessions,
+          engagement_rate,
+          engaged_sessions_per_active_user,
+          average_engagement_time_per_active_user,
+          event_count,
+          key_events,
+          user_key_event_rate,
+          total_revenue
+        ) |>
+        as.matrix() < 0,
+      na.rm = TRUE
+    ),
+
+    sum(
+      demographic_audit$engagement_rate < 0 |
+        demographic_audit$engagement_rate > 1,
+      na.rm = TRUE
+    ),
+
+    sum(
+      demographic_audit$
+        engaged_sessions_per_user_difference > 0.000001,
+      na.rm = TRUE
+    ),
+
+    sum(
+      demographic_audit$new_users >
+        demographic_audit$active_users,
+      na.rm = TRUE
+    ),
+
+    sum(demographic_audit$review_flag, na.rm = TRUE)
+  )
+)
+
+demographic_validation
+```
+
+Review all countries selected by the transparent screening rules. These rows
+remain in the data and require source, medium, hostname and landing-page
+evidence before any exclusion decision could be justified.
+
+```{r}
+demographic_review_countries <- demographic_audit |>
+  filter(review_flag) |>
+  select(
+    country,
+    active_users,
+    new_users,
+    engaged_sessions,
+    engagement_rate,
+    average_engagement_time_per_active_user,
+    event_count,
+    new_user_ratio,
+    review_reason
+  ) |>
+  arrange(desc(active_users))
+
+demographic_review_countries
+```
+
+Compare reported activity associated with Australia and overseas countries.
+Country-level active-user and new-user values are additive metrics in this
+export but may double-count people who were recorded in more than one country;
+the summed fields are labelled accordingly.
+
+```{r}
+demographic_market <- demographic_audit |>
+  mutate(
+    market = if_else(
+      country == "Australia",
+      "Australia",
+      "Overseas"
+    )
+  ) |>
+  group_by(market) |>
+  summarise(
+    number_of_country_rows = n(),
+
+    reported_active_users_sum =
+      sum(active_users, na.rm = TRUE),
+
+    reported_new_users_sum =
+      sum(new_users, na.rm = TRUE),
+
+    engaged_sessions =
+      sum(engaged_sessions, na.rm = TRUE),
+
+    event_count =
+      sum(event_count, na.rm = TRUE),
+
+    engaged_sessions_per_reported_active_user =
+      engaged_sessions / reported_active_users_sum,
+
+    events_per_reported_active_user =
+      event_count / reported_active_users_sum,
+
+    review_country_rows =
+      sum(review_flag, na.rm = TRUE),
+
+    .groups = "drop"
+  )
+
+demographic_market
+```
+
+Assess how much the country rows selected for review affect additive activity
+metrics. The comparison does not delete data and does not produce an official
+GA4 user total or engagement rate.
+
+```{r}
+demographic_sensitivity <- bind_rows(
+  demographic_audit |>
+    summarise(
+      scenario = "All country rows",
+      country_rows = n(),
+      reported_active_users_sum =
+        sum(active_users, na.rm = TRUE),
+      engaged_sessions =
+        sum(engaged_sessions, na.rm = TRUE),
+      event_count =
+        sum(event_count, na.rm = TRUE)
+    ),
+
+  demographic_audit |>
+    filter(!review_flag) |>
+    summarise(
+      scenario = "Excluding review-flagged country rows",
+      country_rows = n(),
+      reported_active_users_sum =
+        sum(active_users, na.rm = TRUE),
+      engaged_sessions =
+        sum(engaged_sessions, na.rm = TRUE),
+      event_count =
+        sum(event_count, na.rm = TRUE)
+    )
+) |>
+  mutate(
+    engaged_sessions_per_reported_active_user =
+      engaged_sessions / reported_active_users_sum,
+
+    events_per_reported_active_user =
+      event_count / reported_active_users_sum
+  )
+
+demographic_sensitivity
+```
+
+Confirm whether all country rows also report zero Key Events and revenue.
+
+```{r}
+demographic_key_event_summary <- demographic_audit |>
+  summarise(
+    country_rows = n(),
+    rows_with_zero_key_events =
+      sum(key_events == 0, na.rm = TRUE),
+    total_key_events =
+      sum(key_events, na.rm = TRUE),
+    total_revenue =
+      sum(total_revenue, na.rm = TRUE)
+  )
+
+demographic_key_event_summary
+```
+
+## 9. Clean Data Outputs and Cleaning Log
+
+Create analysis-ready datasets without modifying the source exports. Each
+output retains the original business dimension, adds documented audit fields
+where relevant, and records the common analysis period.
+
+```{r}
+analysis_start_date <- as.Date("2025-07-01")
+analysis_end_date <- as.Date("2026-06-30")
+
+demographic_clean <- demographic_audit |>
+  transmute(
+    country,
+    active_users,
+    new_users,
+    engaged_sessions,
+    engagement_rate,
+    engaged_sessions_per_active_user,
+    average_engagement_time_per_active_user,
+    event_count,
+    key_events,
+    user_key_event_rate,
+    total_revenue,
+    new_user_ratio,
+    low_engagement_rate_flag,
+    short_engagement_time_flag,
+    review_flag,
+    review_reason,
+    analysis_start_date,
+    analysis_end_date
+  )
+
+events_clean <- events_audit |>
+  transmute(
+    event_name,
+    event_count,
+    total_users,
+    event_count_per_active_user,
+    total_revenue,
+    event_category,
+    tracking_status,
+    analysis_start_date,
+    analysis_end_date
+  )
+
+traffic_clean <- traffic_audit |>
+  transmute(
+    channel,
+    sessions,
+    engaged_sessions,
+    engagement_rate,
+    average_engagement_time_per_session,
+    events_per_session,
+    event_count,
+    key_events,
+    session_key_event_rate,
+    total_revenue,
+    session_share,
+    engagement_rate_check,
+    engagement_rate_difference,
+    channel_flag,
+    analysis_start_date,
+    analysis_end_date
+  )
+
+landing_pages_clean <- landing_page_audit |>
+  transmute(
+    landing_page_original,
+    landing_page_standardised,
+    sessions,
+    active_users,
+    new_users,
+    average_engagement_time_per_session,
+    key_events,
+    total_revenue,
+    session_key_event_rate,
+    has_query_parameter,
+    landing_page_flag,
+    analysis_start_date,
+    analysis_end_date
+  )
+
+pages_clean <- pages_audit |>
+  transmute(
+    page_path_original,
+    page_path_standardised,
+    page_path_template,
+    page_path_was_templated,
+    views,
+    active_users,
+    views_per_active_user,
+    average_engagement_time_per_active_user,
+    event_count,
+    key_events,
+    total_revenue,
+    has_query_parameter,
+    page_path_flag,
+    analysis_start_date,
+    analysis_end_date
+  )
+```
+
+Record every material cleaning or audit rule. `Rows affected` reports the
+number of source rows matching the rule; it does not imply that those rows were
+deleted.
+
+```{r}
+ga4_cleaning_log <- tribble(
+  ~step_id, ~dataset, ~field, ~issue_or_rule, ~action,
+  ~rows_affected, ~status, ~impact_or_note,
+
+  1, "All GA4 exports", "File metadata",
+  "Nine GA4 report metadata rows precede each CSV header",
+  "Skipped the first nine rows during import",
+  NA_integer_, "Completed",
+  "Metadata is excluded from analysis but retained in each raw file",
+
+  2, "All GA4 exports", "Column names",
+  "Exported names contain spaces and punctuation",
+  "Converted names to snake case with clean_names()",
+  NA_integer_, "Completed",
+  "Improves reproducibility without changing values",
+
+  3, "Events", "event_name",
+  "Event names do not indicate their analytical role",
+  "Added event_category and tracking_status",
+  nrow(events_clean), "Completed",
+  "Original event names and counts are unchanged",
+
+  4, "Traffic Acquisition", "channel",
+  "The default-channel-group field name is difficult to use",
+  "Renamed the analysis field to channel and added quality flags",
+  nrow(traffic_clean), "Completed",
+  "No channel was deleted or reassigned",
+
+  5, "Landing Pages", "landing_page_original",
+  "Landing-page paths may contain whitespace, query strings or trailing slashes",
+  "Created landing_page_standardised for comparison",
+  sum(
+    landing_pages_clean$landing_page_original !=
+      landing_pages_clean$landing_page_standardised,
+    na.rm = TRUE
+  ),
+  "Completed",
+  "Original paths remain available",
+
+  6, "Landing Pages", "landing_page_original",
+  "GA4 recorded an unidentified landing-page category",
+  "Retained (not set) and added an audit flag",
+  sum(
+    landing_pages_clean$landing_page_original == "(not set)",
+    na.rm = TRUE
+  ),
+  "Retained and flagged",
+  "Unidentified sessions were not imputed or removed",
+
+  7, "Pages and Screens", "page_path_original",
+  "Paths may contain query strings or trailing slashes",
+  "Created page_path_standardised for comparison",
+  sum(
+    pages_clean$page_path_original !=
+      pages_clean$page_path_standardised,
+    na.rm = TRUE
+  ),
+  "Completed",
+  "Original paths remain available",
+
+  8, "Pages and Screens", "page_path_template",
+  "Dynamic member, order, subscription and group identifiers fragment reporting",
+  "Replaced confirmed dynamic IDs and tokens with {id} or {token} in an analysis-only template field",
+  sum(pages_clean$page_path_was_templated, na.rm = TRUE),
+  "Completed",
+  "The website, GA4 configuration and original paths were not changed",
+
+  9, "Pages and Screens", "active_users",
+  "Active users are not additive across path variants",
+  "Excluded active-user sums from page-template aggregation",
+  NA_integer_, "Completed",
+  "Prevents double-counting users across multiple paths",
+
+  10, "Demographic", "country",
+  "Several high-volume country rows have unusually low engagement",
+  "Added transparent review flags; retained all countries",
+  sum(demographic_clean$review_flag, na.rm = TRUE),
+  "Retained and flagged",
+  "A flag is not proof of bot or invalid traffic",
+
+  11, "All GA4 exports", "key_events",
+  "All supplied Key Event metrics are zero",
+  "Retained the reported zeros and documented the tracking limitation",
+  sum(c(
+    events_clean$event_count == 0,
+    traffic_clean$key_events == 0,
+    landing_pages_clean$key_events == 0,
+    pages_clean$key_events == 0,
+    demographic_clean$key_events == 0
+  ), na.rm = TRUE),
+  "Not fixable in analysis",
+  "Historical conversions cannot be reconstructed reliably from these aggregate exports",
+
+  12, "All GA4 exports", "Source rows",
+  "Raw exports must remain the source of truth",
+  "No raw row was overwritten or deleted",
+  0L, "Completed",
+  "All derived data are written to data/clean/GA4"
+)
+
+ga4_cleaning_log
+```
+
+Write the clean datasets, cleaning log and output manifest to a separate clean
+directory. Re-rendering this report reproducibly replaces only these derived
+outputs.
+
+```{r}
+clean_output_dir <- here("data", "clean", "GA4")
+
+dir.create(
+  clean_output_dir,
+  recursive = TRUE,
+  showWarnings = FALSE
+)
+
+clean_outputs <- list(
+  ga4_demographic_clean = demographic_clean,
+  ga4_events_clean = events_clean,
+  ga4_traffic_acquisition_clean = traffic_clean,
+  ga4_landing_pages_clean = landing_pages_clean,
+  ga4_pages_and_screens_clean = pages_clean
+)
+
+iwalk(
+  clean_outputs,
+  ~ write_csv(
+    .x,
+    file.path(clean_output_dir, paste0(.y, ".csv")),
+    na = ""
+  )
+)
+
+ga4_output_manifest <- imap_dfr(
+  clean_outputs,
+  ~ tibble(
+    dataset = .y,
+    file_name = paste0(.y, ".csv"),
+    rows = nrow(.x),
+    columns = ncol(.x),
+    analysis_start_date = analysis_start_date,
+    analysis_end_date = analysis_end_date
+  )
+)
+
+write_csv(
+  ga4_cleaning_log,
+  file.path(clean_output_dir, "ga4_cleaning_log.csv"),
+  na = ""
+)
+
+write_csv(
+  ga4_output_manifest,
+  file.path(clean_output_dir, "ga4_output_manifest.csv"),
+  na = ""
+)
+
+ga4_output_manifest
+```
+
+## 10. GA4 Audit Summary and Recommendations
+
+### Overall Assessment
+
+The supplied GA4 exports are structurally complete, internally consistent and
+suitable for website traffic, content and general engagement analysis. The
+main constraints are tracking configuration, attribution detail and path
+fragmentation rather than missing CSV values or duplicate source rows.
+
+### Principal Data-Quality Findings
+
+```{r}
+ga4_audit_findings <- tibble(
+  priority = c(
+    "High", "High", "High", "Medium",
+    "Medium", "Medium", "Positive control"
+  ),
+  area = c(
+    "Conversion measurement",
+    "Campaign attribution",
+    "Geographic traffic",
+    "Landing-page completeness",
+    "Page-path fragmentation",
+    "Low-engagement page review",
+    "Cross-report reconciliation"
+  ),
+  finding = c(
+    "Form interactions are collected, but all supplied Key Event metrics are zero",
+    sprintf(
+      "Direct represents %.1f%% of sessions while Email contains only %s sessions",
+      100 * tracking_risk_summary$direct_share,
+      format(tracking_risk_summary$email_sessions, big.mark = ",")
+    ),
+    sprintf(
+      "%s high-volume countries meet the documented engagement review rules",
+      nrow(demographic_review_countries)
+    ),
+    sprintf(
+      "(not set) contains %s sessions (%.1f%% of landing-page sessions)",
+      format(landing_page_summary$not_set_sessions, big.mark = ","),
+      100 * landing_page_summary$not_set_session_share
+    ),
+    sprintf(
+      "%s dynamic page paths were grouped into %s reporting templates",
+      format(page_template_validation$rows_changed_by_templating, big.mark = ","),
+      page_template_validation$distinct_templates_created
+    ),
+    sprintf(
+      "%s pages meet the high-view, low-engagement screening rule",
+      nrow(high_view_low_engagement_pages)
+    ),
+    sprintf(
+      "Pages and Events reconcile exactly at %s page views and %s total events",
+      format(pages_summary$total_views, big.mark = ","),
+      format(pages_summary$total_event_count_across_page_rows, big.mark = ",")
+    )
+  ),
+  analytical_impact = c(
+    "Channel-, page- and country-level conversion rates cannot be reported reliably",
+    "Some campaign traffic may be classified as Direct, limiting channel comparisons",
+    "Overall engagement measures are sensitive to the flagged country rows",
+    "Entry-page analysis is incomplete for sessions without an identified landing page",
+    "Unstandardised URLs would split the same functional page across many rows",
+    "The flagged pages require technical or content review before performance conclusions",
+    "Confirms that the supplied exports represent a consistent event population"
+  )
+)
+
+ga4_audit_findings
+```
+
+### Cleaning Completed in the Analysis Layer
+
+```{r}
+cleaning_completed_summary <- ga4_cleaning_log |>
+  filter(status %in% c("Completed", "Retained and flagged")) |>
+  select(
+    dataset,
+    field,
+    action,
+    rows_affected,
+    status,
+    impact_or_note
+  )
+
+cleaning_completed_summary
+```
+
+### Tracking Limitations Not Fixable in This Analysis
+
+```{r}
+tracking_limitations <- tribble(
+  ~limitation, ~consequence, ~required_follow_up,
+
+  "No Key Events are reported in the supplied exports",
+  "Conversion rates cannot be compared across channels, pages or countries",
+  "STAV's analytics administrator should review which business outcomes should be configured as Key Events",
+
+  "The Events export does not distinguish individual forms or business outcomes",
+  "form_submit cannot be interpreted as event registration or membership conversion",
+  "Future tracking should include stable form_name, form_id or business-specific event names",
+
+  "Only the default channel group is available in the acquisition export",
+  "Direct, Email and Unassigned traffic cannot be diagnosed in detail",
+  "Future exports should include session source, medium, campaign and date",
+
+  "No hostname-by-country or source-by-country breakdown is supplied",
+  "Low-engagement overseas traffic cannot be confirmed as automated or irrelevant",
+  "Investigate the flagged countries using hostname, source, medium and landing-page dimensions",
+
+  "The supplied exports are aggregate 12-month tables without a date dimension",
+  "Monthly trends, campaign timing and before-after comparisons cannot be produced",
+  "Include date or month in future recurring exports",
+
+  "User metrics are not additive across countries or page paths",
+  "Summed row-level users may double-count people across dimension values",
+  "Use GA4 totals or user-level identifiers where an approved, privacy-safe workflow exists",
+
+  "Exit rate and full navigation-path dimensions are not included",
+  "High-exit pages and broken journeys cannot be measured from the supplied files",
+  "Obtain appropriate GA4 exploration exports for journey analysis"
+)
+
+tracking_limitations
+```
+
+### Prioritised Recommendations
+
+```{r}
+ga4_recommendations <- tribble(
+  ~priority, ~recommendation, ~owner, ~expected_benefit,
+
+  "P1", "Define business conversion events and configure approved events as GA4 Key Events",
+  "STAV analytics or website administrator",
+  "Enables conversion reporting for registrations, membership actions and other outcomes",
+
+  "P1", "Adopt a documented UTM naming convention for email, social and campaign links",
+  "STAV marketing team",
+  "Improves campaign attribution and reduces avoidable Direct traffic",
+
+  "P1", "Include date, session source, session medium and campaign in future GA4 exports",
+  "STAV analytics administrator",
+  "Supports monthly reporting and more reliable channel diagnosis",
+
+  "P2", "Investigate (not set) landing pages and reconcile the 1.1% session difference between GA4 reports",
+  "STAV analytics or website administrator",
+  "Improves landing-page completeness and confidence in report totals",
+
+  "P2", "Review the four flagged countries using hostname, source, medium and landing page before any exclusion decision",
+  "Analyst with STAV analytics administrator",
+  "Distinguishes relevant audiences from possible automated or unrelated traffic",
+
+  "P2", "Use page templates or a stable content-group/page-type field for member-area reporting",
+  "Analyst for reporting; website administrator for future tracking",
+  "Prevents dynamic IDs and tokens from fragmenting member engagement analysis",
+
+  "P2", "Technically review high-view pages with near-zero engagement time",
+  "STAV website administrator",
+  "Identifies redirects, broken pages, tracking gaps or automated traffic",
+
+  "P3", "Use this QMD as the reproducible monthly GA4 audit and cleaning pipeline",
+  "Analyst",
+  "Creates consistent clean outputs and an auditable processing record"
+)
+
+ga4_recommendations
+```
+
+### Scope Boundary
+
+All cleaning in this report is performed in the analysis layer. Raw GA4 files
+remain unchanged. Changes to WordPress, member-system routes, GA4 event
+configuration or campaign-tagging practice are outside the analyst's
+implementation scope and are presented only as recommendations for STAV.
