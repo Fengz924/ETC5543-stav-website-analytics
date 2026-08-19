@@ -1,0 +1,480 @@
+---
+title: "STAV CRM Data Audit and Cleaning"
+subtitle: "Contact, consent and membership lifecycle review"
+format:
+  html:
+    toc: true
+    number-sections: true
+editor: visual
+---
+
+```{r}
+#| label: setup
+#| message: false
+#| warning: false
+
+library(tidyverse)
+library(lubridate)
+library(janitor)
+library(here)
+```
+
+## Scope and privacy boundary
+
+This report audits the CRM export `CRM20260729.csv`. The source contains direct identifiers and sensitive contact information. Individual names, email addresses, telephone numbers, street addresses, IP addresses and free-text notes are used only for validation and are not printed in this report or included in the analysis-ready output.
+
+The raw export remains unchanged in `data/raw/CRM/`.
+
+## Data import and CSV structure validation
+
+All 71 source fields are initially imported as character values. This prevents R from silently selecting inconsistent types before the field rules are known.
+
+```{r}
+#| label: import-raw-crm
+
+source_file <- here("data", "raw", "CRM", "CRM20260729.csv")
+extract_date <- as.Date("2026-07-29")
+
+crm_import <- suppressWarnings(
+  read_csv(
+    source_file,
+    col_types = cols(.default = col_character()),
+    trim_ws = FALSE,
+    name_repair = "minimal",
+    show_col_types = FALSE,
+    progress = FALSE,
+    lazy = FALSE
+  )
+)
+
+# Capture parser problems before subsequent transformations remove the
+# problems attribute.
+crm_parse_problems <- problems(crm_import)
+problem_data_rows <- sort(unique(crm_parse_problems$row - 1L))
+
+original_names <- names(crm_import)
+clean_names_vector <- make_clean_names(original_names)
+names(crm_import) <- clean_names_vector
+
+crm_import <- crm_import |>
+  mutate(
+    source_record_number = row_number(),
+    structure_issue = source_record_number %in% problem_data_rows,
+    across(
+      all_of(setdiff(names(crm_import), "source_record_number")),
+      ~ na_if(str_squish(.x), "")
+    )
+  )
+
+crm_structure <- tibble(
+  logical_contact_records = nrow(crm_import),
+  source_fields = length(original_names),
+  readr_parser_problem_rows = length(problem_data_rows),
+  exact_duplicate_rows = sum(duplicated(crm_import |> select(-source_record_number)))
+)
+
+crm_structure
+```
+
+The parser problems originate in unquoted comma/JSON content in `notes`. Fields before `notes` remain available, but fields from `notes` onward are not trusted for the affected rows. The affected rows are retained and flagged.
+
+```{r}
+#| label: quarantine-structural-issues
+
+post_notes_fields <- names(crm_import)[
+  match("notes", names(crm_import)):match("company_department", names(crm_import))
+]
+
+crm_work <- crm_import |>
+  mutate(
+    across(
+      all_of(post_notes_fields),
+      ~ if_else(structure_issue, NA_character_, .x)
+    )
+  )
+```
+
+## Record grain and identifier validation
+
+The audit treats each row as one CRM contact record. `ID` is assessed as the source-system primary key; email and `user_id` are tested as possible secondary keys but are not assumed to have the same meaning.
+
+```{r}
+#| label: identifier-validation
+
+normalise_email <- function(x) str_to_lower(str_squish(x))
+normalise_phone <- function(x) str_replace_all(x, "[^0-9+]", "")
+
+identifier_validation <- tribble(
+  ~identifier, ~non_missing, ~distinct_non_missing, ~duplicate_records, ~interpretation,
+  "id", sum(!is.na(crm_work$id)), n_distinct(crm_work$id, na.rm = TRUE), sum(duplicated(crm_work$id) & !is.na(crm_work$id)), "Preferred CRM contact key",
+  "email", sum(!is.na(crm_work$email)), n_distinct(normalise_email(crm_work$email), na.rm = TRUE), sum(duplicated(normalise_email(crm_work$email)) & !is.na(crm_work$email)), "Unique in this extract but personal and changeable",
+  "user_id", sum(!is.na(crm_work$user_id)), n_distinct(crm_work$user_id, na.rm = TRUE), sum(duplicated(crm_work$user_id) & !is.na(crm_work$user_id)), "Not a contact primary key",
+  "mobile_phone", sum(!is.na(crm_work$mobile_phone)), n_distinct(normalise_phone(crm_work$mobile_phone), na.rm = TRUE), sum(duplicated(normalise_phone(crm_work$mobile_phone)) & !is.na(crm_work$mobile_phone)), "Shared/reused; not a key",
+  "primary_phone", sum(!is.na(crm_work$primary_phone)), n_distinct(normalise_phone(crm_work$primary_phone), na.rm = TRUE), sum(duplicated(normalise_phone(crm_work$primary_phone)) & !is.na(crm_work$primary_phone)), "Shared/reused; not a key"
+)
+
+identifier_validation
+```
+
+## Field groups and data dictionary
+
+```{r}
+#| label: data-dictionary
+
+field_group <- function(field) case_when(
+  field %in% c("id", "full_name", "first_name", "last_name", "email", "user_id", "owner_id") ~ "Identity",
+  field %in% c("mobile_phone", "primary_phone", "primary_phone_extension", "street_address_1", "street_address_2", "city", "postal_zip", "region", "country", "time_zone", "ip_address") ~ "Contact and location",
+  field %in% c("date_created", "birthday") ~ "Contact dates",
+  field %in% c("optin_status", "date_optin_status_changed", "terms_agreement", "gdpr_consent", "gdpr_consent_date", "marketing_consent", "marketing_consent_date", "unsub_date", "unsub_reason", "unsub_feedback") ~ "Consent and subscription",
+  field %in% c("lead_source", "source_page", "utm_campaign", "utm_content", "utm_medium", "utm_term", "utm_source") ~ "Acquisition",
+  field %in% c("membership_status", "membership_plan", "subscription_start_date", "subscription_end_date", "date_of_cancellation", "reason_for_cancellation", "if_other", "date_retired") ~ "Membership lifecycle",
+  field %in% c("year_level", "subjects", "job_title_position", "do_you_hold_an_identified_leadership_role", "do_you_hold_an_identified_leadership_role_other", "primary_teachers_and_schools", "secondary_teachers_and_schools", "p_12_teachers_tertiary_educators_academics_lab_technicians_and_p_12_schools_and_organisations", "your_role") ~ "Professional profile",
+  field %in% c("publications_medium", "send_me_all_updates", "join_the_asta_mailing_list", "send_me_specific_updates") ~ "Communication preferences",
+  field %in% c("last_sponsorship_purchase", "sponsorships_details_sections", "sponsorship_details_divisions", "supporting_sponsorships") ~ "Sponsorship",
+  field %in% c("company_name", "company_website", "company_address", "company_phone", "company_phone_extension", "job_title", "company_department") ~ "Organisation",
+  field %in% c("notes", "tags") ~ "Free text and tags",
+  TRUE ~ "Other"
+)
+
+sensitivity <- function(field) case_when(
+  field %in% c("full_name", "first_name", "last_name", "email", "birthday", "mobile_phone", "primary_phone", "street_address_1", "street_address_2", "postal_zip", "ip_address", "notes", "unsub_feedback") ~ "Direct/high-risk personal information",
+  field %in% c("id", "user_id", "city", "region", "company_name", "company_address", "company_phone") ~ "Indirect identifier",
+  TRUE ~ "Business/analytical field"
+)
+
+crm_data_dictionary <- tibble(
+  source_name = original_names,
+  field = clean_names_vector
+) |>
+  mutate(
+    field_group = map_chr(field, field_group),
+    sensitivity = map_chr(field, sensitivity),
+    records = nrow(crm_work),
+    raw_missing = map_int(field, ~ sum(is.na(crm_work[[.x]]))),
+    raw_missing_rate = raw_missing / records,
+    distinct_non_missing = map_int(field, ~ n_distinct(crm_work[[.x]], na.rm = TRUE))
+  )
+
+crm_data_dictionary
+```
+
+## Field-specific placeholder cleaning
+
+`No` is not cleaned globally. It is retained in genuine yes/no consent fields and converted to missing only in fields where it is a system placeholder.
+
+```{r}
+#| label: placeholder-cleaning
+
+no_placeholder_fields <- c(
+  "birthday", "mobile_phone", "primary_phone", "primary_phone_extension",
+  "street_address_1", "street_address_2", "city", "postal_zip", "region",
+  "country", "time_zone", "ip_address", "lead_source", "source_page",
+  "gdpr_consent_date", "marketing_consent_date", "utm_campaign",
+  "utm_content", "utm_medium", "utm_term", "utm_source",
+  "company_name", "company_website", "company_address", "company_phone",
+  "company_phone_extension", "job_title", "company_department"
+)
+
+no_to_na <- function(x) if_else(str_to_lower(x) == "no", NA_character_, x)
+
+crm_work <- crm_work |>
+  mutate(across(all_of(no_placeholder_fields), no_to_na))
+
+yes_no_to_logical <- function(x) case_when(
+  str_to_lower(x) == "yes" ~ TRUE,
+  str_to_lower(x) == "no" ~ FALSE,
+  is.na(x) ~ NA,
+  TRUE ~ NA
+)
+
+crm_work <- crm_work |>
+  mutate(
+    terms_agreement_clean = yes_no_to_logical(terms_agreement),
+    gdpr_consent_clean = yes_no_to_logical(gdpr_consent),
+    marketing_consent_clean = yes_no_to_logical(marketing_consent),
+    email_clean = normalise_email(email),
+    email_format_valid = str_detect(email_clean, "^[^[:space:]@]+@[^[:space:]@]+\\.[^[:space:]@]+$")
+  )
+```
+
+## Date cleaning and validation
+
+```{r}
+#| label: date-cleaning
+
+parse_crm_date <- function(x) {
+  as.Date(suppressWarnings(parse_date_time(
+    x,
+    orders = c("ymd HMS", "ymd HM", "ymd", "dmy HMS", "dmy HM", "dmy", "mdy HMS", "mdy HM", "mdy"),
+    tz = "Australia/Melbourne",
+    quiet = TRUE
+  )))
+}
+
+crm_work <- crm_work |>
+  mutate(
+    date_created_clean = parse_crm_date(date_created),
+    date_optin_status_changed_clean = parse_crm_date(date_optin_status_changed),
+    birthday_clean = parse_crm_date(birthday),
+    gdpr_consent_date_clean = parse_crm_date(gdpr_consent_date),
+    marketing_consent_date_clean = parse_crm_date(marketing_consent_date),
+    unsub_date_clean = parse_crm_date(unsub_date),
+    subscription_start_date_clean = parse_crm_date(subscription_start_date),
+    subscription_end_date_clean = parse_crm_date(subscription_end_date),
+    date_of_cancellation_clean = parse_crm_date(date_of_cancellation),
+    date_retired_clean = parse_crm_date(date_retired),
+    last_sponsorship_purchase_clean = parse_crm_date(last_sponsorship_purchase)
+  )
+```
+
+```{r}
+#| label: date-validation
+
+date_fields_raw <- c(
+  "date_created", "date_optin_status_changed", "birthday",
+  "gdpr_consent_date", "marketing_consent_date", "unsub_date",
+  "subscription_start_date", "subscription_end_date",
+  "date_of_cancellation", "date_retired", "last_sponsorship_purchase"
+)
+
+date_fields_clean <- paste0(date_fields_raw, "_clean")
+
+date_validation <- map2_dfr(date_fields_raw, date_fields_clean, function(raw, clean) {
+  tibble(
+    field = raw,
+    non_missing_after_placeholder_cleaning = sum(!is.na(crm_work[[raw]])),
+    successfully_parsed = sum(!is.na(crm_work[[clean]])),
+    parse_failures = sum(!is.na(crm_work[[raw]]) & is.na(crm_work[[clean]])),
+    minimum_date = if (all(is.na(crm_work[[clean]]))) as.Date(NA) else min(crm_work[[clean]], na.rm = TRUE),
+    maximum_date = if (all(is.na(crm_work[[clean]]))) as.Date(NA) else max(crm_work[[clean]], na.rm = TRUE),
+    future_after_extract = sum(crm_work[[clean]] > extract_date, na.rm = TRUE)
+  )
+})
+
+date_validation
+```
+
+## Membership status and plan standardisation
+
+```{r}
+#| label: membership-cleaning
+
+normalise_status <- function(x) {
+  key <- x |>
+    str_to_lower() |>
+    str_squish() |>
+    str_replace_all("[ _]", "-")
+  case_when(
+    key == "active" ~ "active",
+    key == "on-hold" ~ "on-hold",
+    key == "expired" ~ "expired",
+    key == "cancelled" ~ "cancelled",
+    key == "pending-cancel" ~ "pending-cancel",
+    key == "paused" ~ "paused",
+    key == "pending" ~ "pending",
+    is.na(key) ~ NA_character_,
+    TRUE ~ "review-unmapped"
+  )
+}
+
+normalise_plan <- function(x) x |>
+  str_replace_all("[–—]", "-") |>
+  str_replace_all("\\s*-\\s*", " - ") |>
+  str_squish()
+
+crm_work <- crm_work |>
+  mutate(
+    membership_status_clean = normalise_status(membership_status),
+    membership_plan_clean = normalise_plan(membership_plan),
+    has_membership_record = !is.na(membership_status_clean) | !is.na(membership_plan_clean),
+    membership_end_before_start = !is.na(subscription_start_date_clean) & !is.na(subscription_end_date_clean) & subscription_end_date_clean < subscription_start_date_clean,
+    cancellation_before_start = !is.na(subscription_start_date_clean) & !is.na(date_of_cancellation_clean) & date_of_cancellation_clean < subscription_start_date_clean,
+    active_with_past_end_date = membership_status_clean == "active" & !is.na(subscription_end_date_clean) & subscription_end_date_clean < extract_date,
+    membership_status_without_plan = !is.na(membership_status_clean) & is.na(membership_plan_clean),
+    consent_date_without_consent_value = (!is.na(marketing_consent_date_clean) & is.na(marketing_consent_clean)) | (!is.na(gdpr_consent_date_clean) & is.na(gdpr_consent_clean)),
+    unsubscribed_without_reason = !is.na(unsub_date_clean) & is.na(unsub_reason)
+  )
+```
+
+```{r}
+#| label: membership-summary
+
+membership_status_summary <- crm_work |>
+  filter(!structure_issue) |>
+  count(membership_status_clean, sort = TRUE, name = "contact_records")
+
+membership_plan_summary <- crm_work |>
+  filter(!structure_issue, !is.na(membership_plan_clean)) |>
+  count(membership_plan_clean, sort = TRUE, name = "contact_records")
+
+membership_status_summary
+membership_plan_summary
+```
+
+## Consolidated validation findings
+
+```{r}
+#| label: consolidated-validation
+
+crm_validation <- tibble(
+  check = c(
+    "Contact records",
+    "Source fields",
+    "Parser/structure issue records",
+    "Missing CRM ID",
+    "Duplicate CRM ID",
+    "Missing email",
+    "Duplicate normalised email",
+    "Invalid email format",
+    "Membership end before start",
+    "Cancellation before membership start",
+    "Active status with past end date",
+    "Membership status without plan",
+    "Consent date without consent value",
+    "Unsubscribe date without reason"
+  ),
+  result = c(
+    nrow(crm_work),
+    length(original_names),
+    sum(crm_work$structure_issue),
+    sum(is.na(crm_work$id)),
+    sum(duplicated(crm_work$id) & !is.na(crm_work$id)),
+    sum(is.na(crm_work$email_clean)),
+    sum(duplicated(crm_work$email_clean) & !is.na(crm_work$email_clean)),
+    sum(!crm_work$email_format_valid, na.rm = TRUE),
+    sum(crm_work$membership_end_before_start, na.rm = TRUE),
+    sum(crm_work$cancellation_before_start, na.rm = TRUE),
+    sum(crm_work$active_with_past_end_date, na.rm = TRUE),
+    sum(crm_work$membership_status_without_plan, na.rm = TRUE),
+    sum(crm_work$consent_date_without_consent_value, na.rm = TRUE),
+    sum(crm_work$unsubscribed_without_reason, na.rm = TRUE)
+  )
+)
+
+crm_validation
+```
+
+## Analysis-ready dataset
+
+The output retains the CRM ID for internal joins but excludes direct personal information and free-text notes. `structure_issue` remains visible so affected records are never silently treated as fully valid.
+
+```{r}
+#| label: analysis-ready-data
+
+crm_contacts_clean <- crm_work |>
+  transmute(
+    crm_record_id = id,
+    user_id,
+    source_record_number,
+    structure_issue,
+    date_created = date_created_clean,
+    optin_status_code = suppressWarnings(as.integer(optin_status)),
+    terms_agreement = terms_agreement_clean,
+    gdpr_consent = gdpr_consent_clean,
+    gdpr_consent_date = gdpr_consent_date_clean,
+    marketing_consent = marketing_consent_clean,
+    marketing_consent_date = marketing_consent_date_clean,
+    unsub_date = unsub_date_clean,
+    unsub_reason,
+    lead_source,
+    source_page,
+    utm_source,
+    utm_medium,
+    utm_campaign,
+    utm_content,
+    utm_term,
+    membership_status = membership_status_clean,
+    membership_plan = membership_plan_clean,
+    subscription_start_date = subscription_start_date_clean,
+    subscription_end_date = subscription_end_date_clean,
+    cancellation_date = date_of_cancellation_clean,
+    cancellation_reason = reason_for_cancellation,
+    retirement_date = date_retired_clean,
+    year_level,
+    subjects,
+    professional_role = your_role,
+    job_title_position,
+    leadership_role = do_you_hold_an_identified_leadership_role,
+    company_name,
+    company_website,
+    company_job_title = job_title,
+    company_department,
+    has_membership_record,
+    membership_end_before_start,
+    cancellation_before_start,
+    active_with_past_end_date,
+    membership_status_without_plan,
+    consent_date_without_consent_value,
+    unsubscribed_without_reason
+  )
+
+crm_contacts_clean
+```
+
+## Cleaning log and outputs
+
+```{r}
+#| label: cleaning-log
+
+crm_cleaning_log <- tribble(
+  ~step, ~area, ~rule, ~status, ~records_affected, ~reason,
+  1L, "Raw import", "Import all 71 fields as character and preserve raw file", "Completed", nrow(crm_import), "Avoid premature type conversion",
+  2L, "CSV structure", "Capture readr parser problems and flag affected records", "Completed", sum(crm_import$structure_issue), "Prevent post-notes field misalignment from entering analysis",
+  3L, "Column names", "Convert source headers to snake_case", "Completed", length(original_names), "Consistent R field names",
+  4L, "Whitespace", "Trim leading, trailing and repeated whitespace; blank strings become NA", "Completed", NA_integer_, "Consistent missing-value handling",
+  5L, "No placeholders", "Convert No to NA only in explicitly listed non-boolean fields", "Completed", NA_integer_, "Preserve genuine consent No values",
+  6L, "Identifiers", "Use CRM ID as contact key; retain user_id only as a secondary field", "Completed", nrow(crm_work), "ID is complete and unique in this extract",
+  7L, "Consent", "Normalise yes/no values to logical fields", "Completed", NA_integer_, "Auditable consent validation",
+  8L, "Dates", "Parse supported CRM date formats; retain parse-failure counts", "Completed", NA_integer_, "Consistent lifecycle dates",
+  9L, "Membership status", "Normalise case, spaces and hyphens to controlled labels", "Completed", sum(!is.na(crm_work$membership_status_clean)), "Consistent membership reporting",
+  10L, "Membership plan", "Normalise dash characters and spacing without merging plan types", "Completed", sum(!is.na(crm_work$membership_plan_clean)), "Remove typography-only variants",
+  11L, "Privacy", "Exclude names, email, phones, addresses, IP and notes from analysis-ready output", "Completed", nrow(crm_work), "Data minimisation",
+  12L, "Quality flags", "Retain status/date/consent inconsistencies as flags; do not delete records", "Completed", NA_integer_, "Support review without unsupported correction"
+)
+
+crm_cleaning_log
+```
+
+```{r}
+#| label: export-clean-outputs
+
+crm_output_dir <- here("data", "clean", "CRM")
+dir.create(crm_output_dir, recursive = TRUE, showWarnings = FALSE)
+
+write_csv(crm_contacts_clean, file.path(crm_output_dir, "crm_contacts_clean.csv"), na = "")
+write_csv(crm_data_dictionary, file.path(crm_output_dir, "crm_data_dictionary.csv"), na = "")
+write_csv(crm_validation, file.path(crm_output_dir, "crm_validation_summary.csv"), na = "")
+write_csv(crm_cleaning_log, file.path(crm_output_dir, "crm_cleaning_log.csv"), na = "")
+
+crm_output_manifest <- tibble(
+  output_file = c(
+    "crm_contacts_clean.csv", "crm_data_dictionary.csv",
+    "crm_validation_summary.csv", "crm_cleaning_log.csv"
+  ),
+  purpose = c(
+    "De-identified analysis-ready contact and membership records",
+    "Field inventory, grouping, sensitivity and raw completeness",
+    "Key structural, identifier, consent and membership checks",
+    "Documented cleaning and validation rules"
+  ),
+  rows = c(
+    nrow(crm_contacts_clean), nrow(crm_data_dictionary),
+    nrow(crm_validation), nrow(crm_cleaning_log)
+  ),
+  generated_from = basename(source_file)
+)
+
+write_csv(crm_output_manifest, file.path(crm_output_dir, "crm_output_manifest.csv"), na = "")
+crm_output_manifest
+```
+
+## Initial audit interpretation
+
+- `ID` is the appropriate CRM contact key for this extract.
+- Email is complete and unique but is personal information and is not exported to the analysis-ready file.
+- `user_id` is not a contact primary key and should not be used to deduplicate contacts.
+- Placeholder `No` values require field-specific treatment.
+- Parser-affected records are retained and transparently flagged.
+- Membership and consent inconsistencies are flags for review, not reasons to delete contacts or overwrite source values.
+
+The next analytical layer should examine member composition, membership plan mix, lifecycle status, consent coverage and acquisition-field completeness using the validated clean output.
