@@ -1,0 +1,311 @@
+---
+title: "STAV Event Participant Data Audit"
+subtitle: "Webinar participant list — July 2026"
+format:
+  html:
+    toc: true
+    number-sections: true
+editor: visual
+---
+
+```{r}
+#| label: setup
+#| message: false
+#| warning: false
+
+library(tidyverse)
+library(readxl)
+library(here)
+library(janitor)
+```
+
+## Scope and interpretation
+
+This audit reviews the file `Webinar_Participants_July_2026.xlsx`. The source contains a participant list but no registration date, attendance status, email, member identifier or event identifier. Therefore, this analysis describes the available participant records; it does **not** calculate registration, attendance or conversion rates.
+
+The exact webinar name and date were not supplied. The reporting label below is therefore taken from the source filename and should be updated when confirmed.
+
+## Data import
+
+The raw workbook remains unchanged in `data/raw/Events/`.
+
+```{r}
+#| label: import
+
+source_file <- here(
+  "data", "raw", "Events", "Webinar_Participants_July_2026.xlsx"
+)
+
+participants_raw <- read_excel(
+  source_file,
+  sheet = "Webinar Participants"
+)
+
+event_structure <- tibble(
+  source_file = basename(source_file),
+  sheet = "Webinar Participants",
+  rows = nrow(participants_raw),
+  columns = ncol(participants_raw),
+  reporting_label = "Webinar participant list — July 2026"
+)
+
+event_structure
+```
+
+## Initial data-quality checks
+
+These checks identify possible issues without removing records.
+
+```{r}
+#| label: initial-validation
+
+participants_initial <- participants_raw |>
+  clean_names() |>
+  mutate(
+    across(
+      where(is.character),
+      ~ na_if(str_squish(.x), "")
+    )
+  )
+
+initial_validation <- tibble(
+  check = c(
+    "Participant rows",
+    "Missing names",
+    "Missing organisation/school",
+    "Missing role/subjects",
+    "Exact duplicate rows",
+    "Duplicate non-missing names"
+  ),
+  result = c(
+    nrow(participants_initial),
+    sum(is.na(participants_initial$name)),
+    sum(is.na(participants_initial$organisation_school)),
+    sum(is.na(participants_initial$role_subjects)),
+    sum(duplicated(participants_initial)),
+    participants_initial |>
+      filter(!is.na(name)) |>
+      summarise(n = sum(duplicated(str_to_lower(name)))) |>
+      pull(n)
+  )
+)
+
+initial_validation
+```
+
+## Cleaning rules
+
+Cleaning is intentionally conservative. No participant row is deleted and no missing organisation or role is inferred.
+
+```{r}
+#| label: clean-participants
+
+participants_clean_internal <- participants_initial |>
+  mutate(
+    source_row = row_number() + 1L,
+    participant_id = str_c("WP202607-", str_pad(row_number(), 3, pad = "0")),
+    name_clean = name,
+    organisation_school_clean = organisation_school,
+    role_subjects_clean = role_subjects,
+    organisation_school_missing = is.na(organisation_school_clean),
+    role_subjects_missing = is.na(role_subjects_clean),
+    profile_complete = !organisation_school_missing & !role_subjects_missing,
+    stav_internal = str_detect(
+      coalesce(organisation_school_clean, ""),
+      regex("^STAV$|Science Teachers.? Association of Victoria", ignore_case = TRUE)
+    ),
+    source_file = basename(source_file),
+    source_sheet = "Webinar Participants",
+    reporting_period = "2026-07"
+  ) |>
+  select(
+    participant_id,
+    source_row,
+    name_clean,
+    organisation_school_clean,
+    role_subjects_clean,
+    organisation_school_missing,
+    role_subjects_missing,
+    profile_complete,
+    stav_internal,
+    source_file,
+    source_sheet,
+    reporting_period
+  )
+
+# The analysis-ready output excludes participant names to reduce unnecessary
+# exposure of personal information. The unchanged raw workbook remains the
+# source of truth if authorised record-level follow-up is required.
+participants_analysis <- participants_clean_internal |>
+  select(-name_clean)
+
+participants_analysis
+```
+
+## Completeness summary
+
+```{r}
+#| label: completeness-summary
+
+completeness_summary <- participants_clean_internal |>
+  summarise(
+    participants = n(),
+    complete_profiles = sum(profile_complete),
+    complete_profile_rate = mean(profile_complete),
+    missing_organisation = sum(organisation_school_missing),
+    missing_role_subjects = sum(role_subjects_missing),
+    stav_internal_records = sum(stav_internal),
+    external_or_unconfirmed_records = sum(!stav_internal)
+  )
+
+completeness_summary
+```
+
+## Organisation coverage
+
+This section reports organisations rather than individual names. Missing organisations are retained as `Not supplied`.
+
+```{r}
+#| label: organisation-summary
+
+organisation_summary <- participants_clean_internal |>
+  mutate(
+    organisation_school_clean = coalesce(
+      organisation_school_clean,
+      "Not supplied"
+    )
+  ) |>
+  count(organisation_school_clean, sort = TRUE, name = "participant_records")
+
+organisation_summary
+```
+
+## Role and subject notes
+
+The source combines roles, year levels and subjects in one free-text field. The following indicators support an initial overview without replacing the original text or imposing an unsupported single category.
+
+```{r}
+#| label: role-subject-indicators
+
+role_subject_summary <- participants_clean_internal |>
+  summarise(
+    records_with_role_subject = sum(!role_subjects_missing),
+    science_mentions = sum(str_detect(
+      coalesce(role_subjects_clean, ""),
+      regex("science", ignore_case = TRUE)
+    )),
+    biology_mentions = sum(str_detect(
+      coalesce(role_subjects_clean, ""),
+      regex("biology", ignore_case = TRUE)
+    )),
+    chemistry_mentions = sum(str_detect(
+      coalesce(role_subjects_clean, ""),
+      regex("chemistry", ignore_case = TRUE)
+    )),
+    physics_mentions = sum(str_detect(
+      coalesce(role_subjects_clean, ""),
+      regex("physics", ignore_case = TRUE)
+    )),
+    psychology_mentions = sum(str_detect(
+      coalesce(role_subjects_clean, ""),
+      regex("psychology", ignore_case = TRUE)
+    )),
+    primary_mentions = sum(str_detect(
+      coalesce(role_subjects_clean, ""),
+      regex("primary|prep", ignore_case = TRUE)
+    )),
+    pre_service_mentions = sum(str_detect(
+      coalesce(role_subjects_clean, ""),
+      regex("pre-service", ignore_case = TRUE)
+    ))
+  )
+
+role_subject_summary
+```
+
+These indicators overlap. For example, one participant record may mention both chemistry and biology, so the counts should not be added to estimate the number of participants.
+
+## Tracking limitations
+
+- The file does not distinguish registrants from attendees.
+- No attendance, cancellation, no-show or completion status is available.
+- No event ID, exact event name or exact event date is included.
+- No registration source, campaign, payment or ticket information is included.
+- No email, CRM/member ID or other approved linkage key is available.
+- The file cannot be joined reliably to GA4 or CRM at participant level.
+- Participant names are personal information and are excluded from the analysis-ready output.
+
+## Recommendations
+
+1.  **P1 — Define the record.** Confirm whether this workbook represents registrants, attendees, webinar-platform participants, or a manually curated list.
+2.  **P1 — Add event metadata.** Include event ID, event name, event date and event type in every future export.
+3.  **P1 — Add funnel status.** Include registration status, attendance status, cancellation/no-show status and registration timestamp.
+4.  **P2 — Add an approved linkage key.** If privacy and governance permit, use a stable CRM/member or registration ID. Do not use names as the primary join.
+5.  **P2 — Add acquisition fields.** Include registration source, medium, campaign and landing page where available.
+6.  **P2 — Separate structured fields.** Store role, school type, year level and subject areas in separate fields or controlled categories.
+
+## Clean outputs and cleaning log
+
+```{r}
+#| label: cleaning-log
+
+event_cleaning_log <- tribble(
+  ~step, ~field, ~rule, ~records_affected, ~status, ~reason,
+  1L, "column names", "Convert headers to snake_case", ncol(participants_raw), "Completed", "Consistent analysis names",
+  2L, "character fields", "Trim repeated and leading/trailing whitespace; convert blank strings to NA", sum(is.na(participants_initial)) - sum(is.na(participants_raw)), "Completed", "Consistent missing-value handling",
+  3L, "participant_id", "Create sequential analysis ID based on source row order", nrow(participants_initial), "Completed", "Avoid using names as analysis identifiers",
+  4L, "missingness flags", "Create organisation, role/subject and profile completeness flags", nrow(participants_initial), "Completed", "Retain records while making limitations visible",
+  5L, "stav_internal", "Flag exact STAV organisation names; do not infer other affiliations", sum(participants_clean_internal$stav_internal), "Completed", "Separate internal records transparently",
+  6L, "name_clean", "Exclude participant name from analysis-ready output", nrow(participants_initial), "Completed", "Data minimisation and privacy",
+  7L, "attendance status", "No cleaning possible because field is absent", NA_integer_, "Source limitation", "Cannot calculate registration-to-attendance conversion",
+  8L, "event metadata", "No cleaning possible because event ID/name/date are absent", NA_integer_, "Source limitation", "Cannot compare events reliably"
+)
+
+event_cleaning_log
+```
+
+```{r}
+#| label: export-clean-data
+
+event_output_dir <- here("data", "clean", "Events")
+dir.create(event_output_dir, recursive = TRUE, showWarnings = FALSE)
+
+write_csv(
+  participants_analysis,
+  file.path(event_output_dir, "webinar_participants_july_2026_clean.csv"),
+  na = ""
+)
+
+write_csv(
+  event_cleaning_log,
+  file.path(event_output_dir, "event_cleaning_log.csv"),
+  na = ""
+)
+
+event_output_manifest <- tibble(
+  output_file = c(
+    "webinar_participants_july_2026_clean.csv",
+    "event_cleaning_log.csv"
+  ),
+  purpose = c(
+    "De-identified analysis-ready participant records",
+    "Documented cleaning rules and source limitations"
+  ),
+  rows = c(nrow(participants_analysis), nrow(event_cleaning_log)),
+  generated_from = basename(source_file)
+)
+
+write_csv(
+  event_output_manifest,
+  file.path(event_output_dir, "event_output_manifest.csv"),
+  na = ""
+)
+
+event_output_manifest
+```
+
+## Audit summary
+
+The source contains 24 participant records and is suitable for a limited description of organisation and role/subject coverage. It is not a complete event-registration dataset. The main data-quality issue is missing context and funnel fields rather than duplicate rows or invalid values. The clean output retains every source record, documents missingness, flags the STAV internal record and removes participant names from the analysis-ready file.
+
+The next analytical step should occur only after STAV confirms what the list represents and provides event metadata plus registration/attendance fields.
