@@ -44,9 +44,6 @@ rsconnect/
 # All confidential and generated project data
 data/**
 
-# Allow fictional example data
-!data/example/
-!data/example/**
 
 # Additional private data directories
 raw_data/
@@ -82,3 +79,7 @@ reports/**/*_files/
 
 # Previous working copies
 reports/CRM/*.original.qmd
+
+# Allow fictional example data
+!data/example/
+!data/example/**
