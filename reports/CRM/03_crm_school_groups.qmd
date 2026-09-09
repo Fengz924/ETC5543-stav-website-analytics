@@ -1,0 +1,576 @@
+---
+title: "CRM school and group analysis"
+subtitle: "Group Admin Group Member coverage and school name review"
+author: "Jordan"
+date: today
+format:
+  html:
+    toc: true
+    toc-depth: 2
+    number-sections: false
+    code-fold: true
+    embed-resources: true
+execute:
+  warning: false
+  message: false
+---
+
+# Purpose
+
+This report analyses how CRM contacts are associated with schools or
+organisations and classifies the requested Group Admin, Group Member and Neither
+categories from `tags`.
+
+It answers four questions:
+
+1. How many contacts are Group Admins, Group Members, both or neither?
+2. How are these contacts distributed across schools and organisations?
+3. Which schools have missing or unusual group-role coverage?
+4. Which supplied school names require standardisation or manual review?
+
+Matching against the separate GROUP MEMBERS export remains pending until that
+file is supplied.
+
+# 1 Setup and input contract
+
+```{r}
+library(tidyverse)
+library(here)
+
+options(scipen = 999)
+here::i_am("reports/CRM/03_crm_school_groups.qmd")
+
+crm_file <- here(
+  "data", "clean", "CRM", "restricted",
+  "crm_contacts_analysis_internal.csv"
+)
+
+stopifnot(file.exists(crm_file))
+
+crm <- read_csv(
+  crm_file,
+  col_types = cols(.default = col_character()),
+  show_col_types = FALSE,
+  progress = FALSE
+)
+
+required_fields <- c(
+  "source_record_number", "id", "full_name", "email", "tags",
+  "company_name", "school_name_key"
+)
+
+stopifnot(all(required_fields %in% names(crm)))
+stopifnot(!anyDuplicated(crm$source_record_number))
+```
+
+# 2 Define group classifications
+
+## 2.1 Detect Group Admin and Group Member tags
+
+The classification uses the exact bracketed tag families found in the CRM.
+Generic words such as `Administrator`, `STAV ADMIN` or membership tags are not
+treated as Group Admin or Group Member.
+
+```{r}
+crm_groups <- crm |>
+  mutate(
+    tags_upper = str_to_upper(coalesce(tags, "")),
+    is_group_admin = str_detect(tags_upper, fixed("[GROUP ADMIN]")),
+    is_group_member = str_detect(tags_upper, fixed("[GROUP MEMBER]")),
+    group_role = case_when(
+      is_group_admin & is_group_member ~ "Both Group Admin and Group Member",
+      is_group_admin ~ "Group Admin only",
+      is_group_member ~ "Group Member only",
+      TRUE ~ "Neither"
+    ),
+    has_school_or_organisation = !is.na(company_name)
+  )
+```
+
+## 2.2 Total contacts carrying each group tag family
+
+```{r}
+group_tag_presence_summary <- tibble(
+  metric = c(
+    "Contacts with a Group Admin tag",
+    "Contacts with a Group Member tag",
+    "Contacts with both Group Admin and Group Member tags",
+    "Contacts with neither Group Admin nor Group Member tag"
+  ),
+  contact_records = c(
+    sum(crm_groups$is_group_admin),
+    sum(crm_groups$is_group_member),
+    sum(crm_groups$is_group_admin & crm_groups$is_group_member),
+    sum(!crm_groups$is_group_admin & !crm_groups$is_group_member)
+  ),
+  percentage_of_contacts = contact_records / nrow(crm_groups)
+)
+
+group_tag_presence_summary |>
+  mutate(
+    percentage_of_contacts = scales::percent(
+      percentage_of_contacts,
+      accuracy = 0.1
+    )
+  ) |>
+  knitr::kable(
+    col.names = c("Tag presence", "Contacts", "Percentage"),
+    align = c("l", "r", "r")
+  )
+```
+
+This table is based on `is_group_admin` and `is_group_member`, which are derived
+from exact patterns in `tags`. The Group Admin total includes Admin-only
+contacts and contacts carrying both tags. The Group Member total similarly
+includes Member-only contacts and contacts carrying both tags. Because the two
+totals overlap, they must not be added together as a unique-contact count.
+
+Each percentage uses all 6,051 CRM contact records as the denominator. Because
+the Group Admin and Group Member rows both include the 146 contacts carrying
+both tags, the four percentages are not mutually exclusive and do not sum to
+100%.
+
+## 2.3 Group tag subtype summary
+
+```{r}
+group_tag_subtypes <- crm_groups |>
+  select(source_record_number, tags) |>
+  filter(!is.na(tags)) |>
+  separate_longer_delim(tags, delim = ",") |>
+  transmute(
+    source_record_number,
+    group_tag = str_squish(tags)
+  ) |>
+  filter(
+    str_detect(
+      str_to_upper(group_tag),
+      regex("^\\[GROUP (ADMIN|MEMBER)\\]")
+    )
+  ) |>
+  count(group_tag, name = "contact_records", sort = TRUE)
+
+knitr::kable(group_tag_subtypes, align = c("l", "r"))
+```
+
+The table is based on the comma-separated values in `tags`. The rows count occurrences of each exact group tag
+subtype. A contact carrying more than one subtype can contribute to more than
+one row, so subtype totals should not automatically be interpreted as unique
+people.
+
+# 3 School and organisation summary
+
+## 3.1 Create one row per standardised school name
+
+```{r}
+school_group_summary <- crm_groups |>
+  filter(!is.na(school_name_key)) |>
+  group_by(school_name_key) |>
+  summarise(
+    school_or_organisation = sort(unique(company_name))[1],
+    supplied_name_variants = n_distinct(company_name),
+    group_admin = sum(is_group_admin),
+    group_member = sum(is_group_member),
+    both_roles = sum(is_group_admin & is_group_member),
+    neither = sum(!is_group_admin & !is_group_member),
+    total_contacts = n(),
+    .groups = "drop"
+  ) |>
+  mutate(
+    has_any_group_role = group_admin > 0 | group_member > 0,
+    no_group_admin = group_admin == 0,
+    multiple_group_admins = group_admin > 1,
+    no_group_member = group_member == 0,
+    neither_only = group_admin == 0 & group_member == 0
+  ) |>
+  arrange(desc(total_contacts), school_or_organisation)
+
+school_group_summary |>
+  select(
+    school_or_organisation, group_admin, group_member,
+    both_roles, neither, total_contacts
+  ) |>
+  slice_head(n = 30) |>
+  knitr::kable(
+    col.names = c(
+      "School or organisation", "Group Admin", "Group Member",
+      "Both", "Neither", "Total contacts"
+    ),
+    align = c("l", "r", "r", "r", "r", "r")
+  )
+```
+
+The table is based on `company_name`, `school_name_key` and the Group role flags
+derived from `tags`. Contacts are grouped using the basic standardised
+school-name key. A contact with both roles contributes to both the Admin and
+Member columns, appears once in `Both`, and appears once in `Total contacts`.
+Therefore Admin, Member and Neither should not be summed to reproduce Total.
+
+The displayed table shows the 30 organisations with the largest number of CRM
+contacts. The saved CSV contains every standardised school or organisation.
+
+## 3.2 Coverage indicators
+
+Two populations are shown. The first covers every supplied school or
+organisation. The second covers only organisations with at least one Group
+Admin or Group Member tag. This distinction prevents unrelated organisations
+from being treated automatically as group-membership problems.
+
+```{r}
+all_organisation_coverage <- school_group_summary |>
+  summarise(
+    organisations = n(),
+    no_group_admin = sum(no_group_admin),
+    multiple_group_admins = sum(multiple_group_admins),
+    no_group_member = sum(no_group_member),
+    neither_only = sum(neither_only)
+  ) |>
+  mutate(
+    population = "All standardised schools or organisations",
+    .before = 1
+  )
+
+group_organisation_coverage <- school_group_summary |>
+  filter(has_any_group_role) |>
+  summarise(
+    organisations = n(),
+    no_group_admin = sum(no_group_admin),
+    multiple_group_admins = sum(multiple_group_admins),
+    no_group_member = sum(no_group_member),
+    neither_only = sum(neither_only)
+  ) |>
+  mutate(
+    population = "Organisations with at least one group-role tag",
+    .before = 1
+  )
+
+school_group_coverage <- bind_rows(
+  all_organisation_coverage,
+  group_organisation_coverage
+)
+
+knitr::kable(
+  school_group_coverage,
+  col.names = c(
+    "Population", "Distinct organisations",
+    "Organisations with no Group Admin",
+    "Organisations with multiple Group Admins",
+    "Organisations with no Group Member",
+    "Organisations containing Neither contacts only"
+  ),
+  align = c("l", "r", "r", "r", "r", "r")
+)
+```
+
+The table is based on the school-level counts of `is_group_admin` and
+`is_group_member`. The first row covers every populated organisation;
+the second is limited to organisations with at least one selected group-role
+tag. `No Admin`, `Multiple Admins` and `No Member` are review indicators, not
+proof that the CRM is wrong, because some organisational structures may be
+valid exceptions.
+
+## 3.3 Contacts with group tags but no school
+
+```{r}
+missing_school_group_summary <- crm_groups |>
+  filter(
+    !has_school_or_organisation,
+    is_group_admin | is_group_member
+  ) |>
+  count(group_role, name = "contact_records") |>
+  arrange(desc(contact_records))
+
+knitr::kable(
+  missing_school_group_summary,
+  col.names = c("Group role", "Contacts without school or organisation"),
+  align = c("l", "r")
+)
+```
+
+The table is based on `company_name`, `is_group_admin` and `is_group_member`.
+These contacts have a Group Admin or Group Member
+tag but no populated `company_name`. Their role can be identified, but they
+cannot be allocated to a school or organisation until the missing value is
+verified.
+
+# 4 School-name review
+
+## 4.1 Basic name variants
+
+The clean dataset standardises case, spacing and punctuation in
+`school_name_key`. This section lists keys associated with more than one supplied
+name. It does not attempt fuzzy matching or automatically merge abbreviations.
+
+```{r}
+school_name_variant_detail <- crm_groups |>
+  filter(!is.na(school_name_key), !is.na(company_name)) |>
+  count(school_name_key, company_name, name = "contact_records") |>
+  add_count(school_name_key, name = "supplied_name_variants") |>
+  filter(supplied_name_variants > 1) |>
+  arrange(school_name_key, desc(contact_records), company_name)
+
+school_name_variant_summary <- school_name_variant_detail |>
+  distinct(school_name_key, supplied_name_variants) |>
+  arrange(desc(supplied_name_variants), school_name_key)
+
+school_name_standardisation_summary <- tibble(
+  metric = c(
+    "Distinct supplied company names",
+    "Distinct standardised organisation keys",
+    "Reduction after basic standardisation"
+  ),
+  result = c(
+    n_distinct(crm_groups$company_name, na.rm = TRUE),
+    n_distinct(crm_groups$school_name_key, na.rm = TRUE),
+    n_distinct(crm_groups$company_name, na.rm = TRUE) -
+      n_distinct(crm_groups$school_name_key, na.rm = TRUE)
+  )
+)
+
+school_name_standardisation_examples <- school_name_variant_detail |>
+  select(
+    `Supplied company_name` = company_name,
+    `Standardised school_name_key` = school_name_key,
+    `Contacts using supplied name` = contact_records
+  ) |>
+  slice_head(n = 10)
+
+school_name_standardisation_summary |>
+  knitr::kable(
+    col.names = c("Standardisation measure", "Names"),
+    align = c("l", "r")
+  )
+
+school_name_standardisation_examples |>
+  knitr::kable(align = c("l", "l", "r"))
+
+tibble(
+  metric = c(
+    "Standardised school or organisation names",
+    "Keys with multiple supplied-name variants",
+    "Supplied names in those variant groups"
+  ),
+  result = c(
+    n_distinct(crm_groups$school_name_key, na.rm = TRUE),
+    nrow(school_name_variant_summary),
+    nrow(school_name_variant_detail)
+  )
+) |>
+  knitr::kable(align = c("l", "r"))
+```
+
+The first table shows how 1,487 distinct supplied `company_name` values become
+1,301 distinct `school_name_key` values, a reduction of 186 names. The example
+table shows 10 actual transformations from variant groups. Basic
+standardisation applies the following operations in order: convert text to
+lowercase; remove leading, trailing and repeated whitespace; remove characters
+other than letters, numbers and spaces; then collapse any whitespace created by
+punctuation removal. It does not expand abbreviations, correct spelling or
+remove words such as School, College or Campus.
+
+The calculation is based on `company_name` and `school_name_key`. A variant group contains multiple supplied names
+that become identical after case, spacing and punctuation are standardised.
+This identifies straightforward formatting variation only and does not cover
+abbreviations or different campus names.
+
+## 4.2 Fuzzy name candidates for manual review
+
+Names such as `Melbourne High School` and `Melb High` will not necessarily share
+the same basic key. The following process blocks names by their first three
+characters, then identifies close edit-distance or containment matches. These
+are candidates only and do not overwrite the CRM values.
+
+```{r}
+school_key_lookup <- crm_groups |>
+  filter(!is.na(school_name_key), !is.na(company_name)) |>
+  count(school_name_key, company_name, name = "contact_records") |>
+  group_by(school_name_key) |>
+  slice_max(contact_records, n = 1, with_ties = FALSE) |>
+  ungroup() |>
+  transmute(
+    school_name_key,
+    display_name = company_name,
+    contact_records,
+    match_block = str_sub(school_name_key, 1, 3)
+  ) |>
+  filter(nchar(school_name_key) >= 6)
+
+school_name_fuzzy_candidates <- school_key_lookup |>
+  rename(
+    school_name_key_a = school_name_key,
+    display_name_a = display_name,
+    contact_records_a = contact_records
+  ) |>
+  inner_join(
+    school_key_lookup |>
+      rename(
+        school_name_key_b = school_name_key,
+        display_name_b = display_name,
+        contact_records_b = contact_records
+      ),
+    by = "match_block"
+  ) |>
+  filter(school_name_key_a < school_name_key_b) |>
+  mutate(
+    edit_distance = map2_int(
+      school_name_key_a,
+      school_name_key_b,
+      ~ adist(.x, .y)[1]
+    ),
+    normalised_edit_distance = edit_distance /
+      pmax(nchar(school_name_key_a), nchar(school_name_key_b)),
+    one_name_contains_the_other = map2_lgl(
+      school_name_key_a,
+      school_name_key_b,
+      ~ str_detect(.x, fixed(.y)) | str_detect(.y, fixed(.x))
+    )
+  ) |>
+  filter(
+    normalised_edit_distance <= 0.20 |
+      one_name_contains_the_other
+  ) |>
+  arrange(normalised_edit_distance, display_name_a, display_name_b) |>
+  select(
+    display_name_a, display_name_b,
+    contact_records_a, contact_records_b,
+    edit_distance, normalised_edit_distance,
+    one_name_contains_the_other
+  )
+
+school_name_fuzzy_candidates |>
+  slice_head(n = 30) |>
+  mutate(
+    normalised_edit_distance = scales::percent(
+      normalised_edit_distance,
+      accuracy = 0.1
+    )
+  ) |>
+  knitr::kable(
+    col.names = c(
+      "Supplied name A", "Supplied name B", "Contacts A", "Contacts B",
+      "Edit distance", "Normalised distance", "Containment match"
+    ),
+    align = c("l", "l", "r", "r", "r", "r", "c")
+  )
+
+school_name_review_method_summary <- tibble(
+  review_measure = c(
+    "Standardised keys with multiple supplied variants",
+    "Fuzzy candidate pairs requiring review"
+  ),
+  result = c(
+    nrow(school_name_variant_summary),
+    nrow(school_name_fuzzy_candidates)
+  ),
+  calculation_rule = c(
+    paste(
+      "Group records by school_name_key; count distinct company_name values;",
+      "retain keys where the count is greater than one."
+    ),
+    paste(
+      "Use distinct keys of at least six characters; compare pairs sharing",
+      "the first three characters; retain pairs with normalised Levenshtein",
+      "distance <= 20% or where one key contains the other."
+    )
+  )
+)
+
+school_name_review_method_summary |>
+  knitr::kable(
+    col.names = c("Review measure", "Result", "Calculation rule"),
+    align = c("l", "r", "l")
+  )
+```
+
+The table is based on pairs of distinct `school_name_key` values. Lower normalised edit distance indicates more
+similar text. `Containment match` means one standardised name occurs inside the
+other. These signals only rank candidate pairs for review; they do not confirm
+that the two names refer to the same organisation.
+
+The full candidate list should be reviewed with STAV before creating a final
+source-to-standard school-name mapping.
+
+Basic standardisation reduced 1,487 distinct supplied organization names to 1,301 standardised keys by resolving differences in case, spacing and punctuation. The variant-detail file contains 342 supplied names across 156 standardised keys and provides an audit trail of these automatic formatting-based groupings. These records do not generally require full manual review, although a sample should be checked for unintended matches.
+
+A further 489 fuzzy candidate pairs were identified after basic standardisation. These pairs remain separate in the current analysis because text similarity does not confirm that they represent the same organization. They require manual review before an approved organization-name mapping is created. Consequently, the current total of 1,301 organisations is provisional and may decrease if some fuzzy candidates are confirmed as duplicates.
+
+# 5 Findings and limitations
+
+- Group roles are derived from exact bracketed tag families.
+- A contact may carry both Group Admin and Group Member tags.
+- Missing school names prevent group contacts from being assigned to an
+  organisation-level summary.
+- `company_name` contains both schools and other organisations; this report does
+  not assume every value is a school.
+- Name standardisation covers formatting differences only. Abbreviations,
+  campuses and genuinely different organisations require manual review.
+- The separate GROUP MEMBERS export has not been supplied, so cross-dataset
+  reconciliation is not included yet.
+
+# 6 Save outputs
+
+```{r}
+output_dir <- here("data", "analysis", "CRM", "03_school_groups")
+restricted_dir <- file.path(output_dir, "restricted")
+
+dir.create(output_dir, recursive = TRUE, showWarnings = FALSE)
+dir.create(restricted_dir, recursive = TRUE, showWarnings = FALSE)
+
+group_contacts_missing_school_internal <- crm_groups |>
+  filter(
+    !has_school_or_organisation,
+    is_group_admin | is_group_member
+  ) |>
+  select(
+    source_record_number, id, full_name, email, tags,
+    is_group_admin, is_group_member, group_role
+  ) |>
+  arrange(group_role, full_name)
+
+school_group_contacts_internal <- crm_groups |>
+  filter(!is.na(school_name_key)) |>
+  select(
+    source_record_number, id, full_name, email, company_name,
+    school_name_key, tags, is_group_admin, is_group_member, group_role
+  ) |>
+  arrange(school_name_key, group_role, full_name)
+
+aggregate_outputs <- list(
+  crm_group_tag_presence_summary = group_tag_presence_summary,
+  crm_group_tag_subtypes = group_tag_subtypes,
+  crm_school_group_summary = school_group_summary,
+  crm_school_group_coverage = school_group_coverage,
+  crm_missing_school_group_summary = missing_school_group_summary,
+  crm_school_name_variant_summary = school_name_variant_summary,
+  crm_school_name_variant_detail = school_name_variant_detail,
+  crm_school_name_fuzzy_candidates = school_name_fuzzy_candidates,
+  crm_school_name_standardisation_summary =
+    school_name_standardisation_summary,
+  crm_school_name_standardisation_examples =
+    school_name_standardisation_examples,
+  crm_school_name_review_method_summary = school_name_review_method_summary
+)
+
+iwalk(
+  aggregate_outputs,
+  ~ write_csv(.x, file.path(output_dir, paste0(.y, ".csv")), na = "")
+)
+
+write_csv(
+  group_contacts_missing_school_internal,
+  file.path(restricted_dir, "crm_group_contacts_missing_school_internal.csv"),
+  na = ""
+)
+
+write_csv(
+  school_group_contacts_internal,
+  file.path(restricted_dir, "crm_school_group_contacts_internal.csv"),
+  na = ""
+)
+```
+
+# 7 Handoff
+
+To complete the second phase of the school-group work, obtain the separate
+GROUP MEMBERS export and document its unique contact and organisation keys. It
+can then be matched against the CRM analysis data using email first and a
+reviewed school-name mapping second.

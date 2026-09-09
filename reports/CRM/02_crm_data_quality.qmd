@@ -1,0 +1,540 @@
+---
+title: "CRM data quality analysis"
+subtitle: "Record volume duplicates validity and completeness"
+author: "Jordan"
+date: today
+format:
+  html:
+    toc: true
+    toc-depth: 2
+    number-sections: true
+    code-fold: true
+    embed-resources: true
+execute:
+  warning: false
+  message: false
+---
+
+# Purpose
+
+This report evaluates the quality of the 25 agreed CRM business variables. It
+answers four questions:
+
+1. How many contact records are available?
+2. How many duplicate or possible duplicate records are present?
+3. Are key identifiers and contact fields technically valid?
+4. How complete are the selected variables?
+
+Potential issues are flagged for review rather than deleted. Membership category
+reconciliation, school group analysis and active or dormant contact analysis are
+handled in later reports.
+
+# 1 Setup and input contract
+
+```{r}
+library(tidyverse)
+library(lubridate)
+library(here)
+
+options(scipen = 999)
+here::i_am("reports/CRM/02_crm_data_quality.qmd")
+
+crm_file <- here(
+  "data", "clean", "CRM", "restricted",
+  "crm_contacts_analysis_internal.csv"
+)
+
+variable_contract_file <- here(
+  "data", "clean", "CRM", "crm_analysis_variable_contract.csv"
+)
+
+import_validation_file <- here(
+  "data", "clean", "CRM", "crm_import_validation.csv"
+)
+
+stopifnot(file.exists(crm_file))
+stopifnot(file.exists(variable_contract_file))
+stopifnot(file.exists(import_validation_file))
+
+crm <- read_csv(
+  crm_file,
+  col_types = cols(.default = col_character()),
+  show_col_types = FALSE,
+  progress = FALSE
+)
+
+variable_contract <- read_csv(
+  variable_contract_file,
+  show_col_types = FALSE
+)
+
+import_validation <- read_csv(
+  import_validation_file,
+  show_col_types = FALSE
+)
+
+exact_duplicate_source_rows <- import_validation |>
+  filter(check == "Exact duplicate source rows") |>
+  pull(result)
+
+stopifnot(length(exact_duplicate_source_rows) == 1L)
+
+selected_business_fields <- variable_contract$source_field
+
+stopifnot(length(selected_business_fields) == 25L)
+stopifnot(all(selected_business_fields %in% names(crm)))
+stopifnot(!anyDuplicated(crm$source_record_number))
+```
+
+# 2 Record volume
+
+```{r}
+crm_record_summary <- tibble(
+  metric = c(
+    "Contact records",
+    "Distinct CRM IDs",
+    "Distinct normalised emails",
+    "Records with a school or organisation",
+    "Records with membership status",
+    "Records with membership plan"
+  ),
+  records = c(
+    nrow(crm),
+    n_distinct(crm$id, na.rm = TRUE),
+    n_distinct(crm$email_key, na.rm = TRUE),
+    sum(!is.na(crm$company_name)),
+    sum(!is.na(crm$membership_status)),
+    sum(!is.na(crm$membership_plan))
+  )
+)
+
+knitr::kable(crm_record_summary, align = c("l", "r"))
+```
+
+The table is based on `id`, `email_key`, `company_name`, `membership_status`
+and `membership_plan`. It summarises the number of CRM contact
+records and the availability of several key fields:
+
+- **Contact records:** The CRM extract contains 6,051 contact records in total.
+- **Distinct CRM IDs:** All 6,051 records have a unique CRM ID; no CRM ID is
+  shared by multiple records.
+- **Distinct normalised emails:** All 6,051 records have a unique email after
+  converting emails to lowercase and removing unnecessary spaces.
+- **Records with a school or organisation:** 3,934 contact records contain a
+  non-missing value in `company_name`. This does not mean there are 3,934
+  different schools or organisations, because multiple contacts can belong to
+  the same organisation.
+- **Records with membership status:** 1,038 contact records contain a value in
+  `membership_status`. This is the total across all recorded status categories,
+  not the number of Active members.
+- **Records with membership plan:** 1,196 contact records contain a value in
+  `membership_plan`. This counts contacts with a populated plan and does not
+  represent the number of distinct membership-plan types.
+
+These counts measure whether the relevant field is populated. They do not
+establish that the recorded value is correct or current.
+
+The record count is the number of rows in the CRM extract. It should not be
+interpreted as the number of unique people until duplicate candidates have been
+reviewed.
+
+# 3 Duplicate analysis
+
+## 3.1 Duplicate indicators
+
+Email and CRM ID are treated as stronger identifiers. Matching first and last
+names are treated only as manual-review candidates because different people can
+share a name and one teacher may work across multiple schools.
+
+```{r}
+duplicate_summary <- tibble(
+  duplicate_check = c(
+    "Exact duplicate source rows",
+    "Records with a duplicated CRM ID",
+    "Records with a duplicated normalised email",
+    "Contacts sharing a normalised first and last name"
+  ),
+  flagged_records = c(
+    exact_duplicate_source_rows,
+    sum(crm$duplicate_crm_id_candidate == "TRUE", na.rm = TRUE),
+    sum(crm$duplicate_email_candidate == "TRUE", na.rm = TRUE),
+    sum(crm$duplicate_name_candidate == "TRUE", na.rm = TRUE)
+  )
+) |>
+  mutate(
+    percentage_of_contacts = flagged_records / nrow(crm)
+  )
+
+duplicate_summary |>
+  mutate(
+    percentage_of_contacts = scales::percent(
+      percentage_of_contacts,
+      accuracy = 0.1
+    )
+  ) |>
+  knitr::kable(align = c("l", "r", "r"))
+```
+
+The table is based on all 71 raw fields, `id`, `email_key` and `name_key`.
+Exact rows compare all 71 original source fields.
+CRM ID and email checks flag every record sharing the same identifier after
+standardisation. The same-name result only flags contacts sharing a normalised
+first and last name; these are review candidates, not confirmed duplicates.
+
+## 3.2 Same-name review groups
+
+```{r}
+duplicate_name_groups <- crm |>
+  filter(duplicate_name_candidate == "TRUE", !is.na(name_key)) |>
+  group_by(name_key) |>
+  summarise(
+    contact_records = n(),
+    distinct_emails = n_distinct(email_key, na.rm = TRUE),
+    distinct_schools = n_distinct(school_name_key, na.rm = TRUE),
+    .groups = "drop"
+  ) |>
+  arrange(desc(contact_records), desc(distinct_schools), name_key)
+
+duplicate_name_group_summary <- tibble(
+  metric = c(
+    "Duplicated-name groups",
+    "Groups containing more than one email",
+    "Groups associated with more than one school"
+  ),
+  groups = c(
+    nrow(duplicate_name_groups),
+    sum(duplicate_name_groups$distinct_emails > 1),
+    sum(duplicate_name_groups$distinct_schools > 1)
+  )
+)
+
+knitr::kable(duplicate_name_group_summary, align = c("l", "r"))
+```
+
+The table is based on `name_key`, `email_key` and `school_name_key`. A group
+contains two or more contacts with the same
+normalised first and last name. Distinct-email and distinct-school counts help
+separate likely different people from records that warrant closer review, but
+neither measure confirms identity.
+
+These groups are not confirmed duplicates. The restricted review file retains
+names, emails and organisations so the records can be checked manually.
+
+# 4 Validity and consistency checks
+
+## 4.1 Main checks
+
+```{r}
+validity_summary <- tibble(
+  quality_check = c(
+    "Missing CRM ID",
+    "Missing email",
+    "Invalid non-missing email format",
+    "Full name differs from first plus last name",
+    "Invalid non-missing Australian postcode",
+    "Parser or row-structure issue"
+  ),
+  flagged_records = c(
+    sum(is.na(crm$id)),
+    sum(is.na(crm$email_key)),
+    sum(crm$email_format_valid == "FALSE", na.rm = TRUE),
+    sum(crm$full_name_component_mismatch == "TRUE", na.rm = TRUE),
+    sum(crm$australian_postcode_format_valid == "FALSE", na.rm = TRUE),
+    sum(crm$structure_issue == "TRUE", na.rm = TRUE)
+  )
+) |>
+  mutate(percentage_of_contacts = flagged_records / nrow(crm))
+
+validity_summary |>
+  mutate(
+    percentage_of_contacts = scales::percent(
+      percentage_of_contacts,
+      accuracy = 0.1
+    )
+  ) |>
+  knitr::kable(align = c("l", "r", "r"))
+```
+
+The table is based on `id`, `email_key`, `email_format_valid`,
+`full_name_component_mismatch`, `australian_postcode_format_valid` and
+`structure_issue`. Each result counts records failing one technical
+rule. A zero means no issue was detected by that rule, not that the underlying
+data has been independently verified. A record may appear in more than one
+check, so the rows should not be added together as a unique-contact total.
+
+Email validity is a syntax check only. It does not confirm that the mailbox
+exists, belongs to the named contact or can receive messages.
+
+## 4.2 Basic school-name consistency check
+
+This check identifies differences that collapse after case, spacing and
+punctuation are standardised. Fuzzy matching and business-approved school-name
+mapping are handled in `03_crm_school_groups.qmd`.
+
+```{r}
+school_name_variants <- crm |>
+  filter(!is.na(company_name), !is.na(school_name_key)) |>
+  distinct(school_name_key, company_name) |>
+  count(school_name_key, name = "raw_name_variants") |>
+  filter(raw_name_variants > 1) |>
+  arrange(desc(raw_name_variants), school_name_key)
+
+school_name_consistency_summary <- tibble(
+  metric = c(
+    "Distinct supplied school or organisation names",
+    "Distinct basic-standardised names",
+    "Standardised names with multiple supplied variants"
+  ),
+  result = c(
+    n_distinct(crm$company_name, na.rm = TRUE),
+    n_distinct(crm$school_name_key, na.rm = TRUE),
+    nrow(school_name_variants)
+  )
+)
+
+knitr::kable(school_name_consistency_summary, align = c("l", "r"))
+```
+
+The table is based on `company_name` and `school_name_key`. Supplied names are the distinct raw `company_name`
+values. Standardised names remove differences in case, spacing and punctuation.
+Multiple supplied variants under one key indicate formatting inconsistency, not
+necessarily separate schools or confirmed duplicates.
+
+# 5 Completeness of the 25 selected variables
+
+## 5.1 Completeness calculation
+
+Completeness is calculated after the missing-value cleaning in Report 01.
+Whitespace-only values and agreed `No` placeholders are therefore counted as
+missing where appropriate.
+
+```{r}
+profile_field <- function(field_name) {
+  values <- crm[[field_name]]
+
+  tibble(
+    field = field_name,
+    records_populated = sum(!is.na(values)),
+    missing_records = sum(is.na(values)),
+    completion_rate = sum(!is.na(values)) / nrow(crm),
+    distinct_non_missing = n_distinct(values, na.rm = TRUE)
+  )
+}
+
+crm_selected_field_completeness <- map_dfr(
+  selected_business_fields,
+  profile_field
+) |>
+  left_join(variable_contract, by = c("field" = "source_field")) |>
+  arrange(position) |>
+  select(
+    position, field, records_populated, missing_records,
+    completion_rate, distinct_non_missing
+  )
+
+crm_selected_field_completeness |>
+  mutate(
+    completion_rate = scales::percent(completion_rate, accuracy = 0.1)
+  ) |>
+  select(-position) |>
+  knitr::kable(
+    col.names = c(
+      "Field", "Populated", "Missing", "Completion rate", "Distinct values"
+    ),
+    align = c("l", "r", "r", "r", "r")
+  )
+```
+
+The table is based on the 25 fields listed in
+`crm_analysis_variable_contract.csv`. For each field, completion rate is
+populated records divided by all
+6,051 CRM contacts after agreed blank and placeholder cleaning. It measures the
+presence of a value only; it does not measure accuracy, relevance or whether the
+field should apply to every contact.
+
+## 5.2 Completeness chart
+
+```{r}
+crm_selected_field_completeness |>
+  mutate(
+    field = forcats::fct_reorder(field, completion_rate)
+  ) |>
+  ggplot(aes(x = completion_rate, y = field)) +
+  geom_col(fill = "#315D80", width = 0.72) +
+  geom_text(
+    aes(label = scales::percent(completion_rate, accuracy = 0.1)),
+    hjust = -0.08,
+    size = 3
+  ) +
+  scale_x_continuous(
+    limits = c(0, 1.08),
+    breaks = seq(0, 1, 0.2),
+    labels = scales::percent_format()
+  ) +
+  labs(
+    x = "Completion rate",
+    y = NULL,
+    title = "Completeness of the 25 selected CRM variables"
+  ) +
+  theme_minimal(base_size = 11) +
+  theme(
+    panel.grid.major.y = element_blank(),
+    plot.title = element_text(face = "bold")
+  )
+```
+
+## 5.3 Completeness bands
+
+The bands organise attention; they do not determine whether a field is
+business-critical. A low-completion optional field may be acceptable, while a
+small gap in a required identifier may still need immediate action.
+
+```{r}
+crm_completeness_bands <- crm_selected_field_completeness |>
+  mutate(
+    completeness_band = case_when(
+      completion_rate >= 0.95 ~ "95% or higher",
+      completion_rate >= 0.75 ~ "75% to 94.9%",
+      completion_rate >= 0.50 ~ "50% to 74.9%",
+      TRUE ~ "Below 50%"
+    )
+  ) |>
+  count(completeness_band, name = "fields") |>
+  mutate(
+    completeness_band = factor(
+      completeness_band,
+      levels = c(
+        "95% or higher", "75% to 94.9%",
+        "50% to 74.9%", "Below 50%"
+      )
+    )
+  ) |>
+  arrange(completeness_band)
+
+knitr::kable(crm_completeness_bands, align = c("l", "r"))
+```
+
+The table is based on the `completion_rate` calculated for each selected field.
+Each of the 25 selected variables is assigned to one
+completion-rate band. These bands help prioritise review but are not pass/fail
+standards, because optional and conditional fields can be legitimately blank.
+
+# 6 Findings
+
+```{r}
+lowest_completeness <- crm_selected_field_completeness |>
+  slice_min(completion_rate, n = 5, with_ties = FALSE) |>
+  mutate(completion_label = scales::percent(completion_rate, accuracy = 0.1))
+
+highest_completeness <- crm_selected_field_completeness |>
+  slice_max(completion_rate, n = 5, with_ties = FALSE) |>
+  mutate(completion_label = scales::percent(completion_rate, accuracy = 0.1))
+```
+
+The results should be interpreted using both data quality and business purpose:
+
+- CRM ID and email quality determine whether records can be matched reliably.
+- Same-name groups require manual review and should not be automatically merged.
+- Low-completion fields indicate where collection processes may need review.
+- Membership status completeness is reported here, but category agreement with
+  membership tags is evaluated separately in Report 04.
+- School-name checks in this report cover only simple formatting differences.
+
+### Five least complete selected fields
+
+```{r}
+lowest_completeness |>
+  select(field, records_populated, missing_records, completion_label) |>
+  knitr::kable(
+    col.names = c("Field", "Populated", "Missing", "Completion rate"),
+    align = c("l", "r", "r", "r")
+  )
+```
+
+The table is based on the five smallest values of `completion_rate`. These are
+the five selected variables with the
+lowest populated proportions. They identify where values are least available;
+they do not show that the missing values are errors or that all five fields
+should become mandatory.
+
+# 7 Limitations
+
+- The analysis describes the CRM extract dated 29 July 2026.
+- Email format validation does not test mailbox deliverability.
+- Same names are candidates for review, not confirmed duplicate people.
+- Completeness measures whether a value exists, not whether it is correct or
+  current.
+- Only the 25 approved business variables are included in completeness results.
+- Membership activity and relationship activity are different concepts and are
+  not inferred in this report.
+
+# 8 Save outputs
+
+Aggregate results contain no contact-level personal information. Record-level
+review files remain in the restricted folder.
+
+```{r}
+output_dir <- here("data", "analysis", "CRM", "02_data_quality")
+restricted_dir <- file.path(output_dir, "restricted")
+
+dir.create(output_dir, recursive = TRUE, showWarnings = FALSE)
+dir.create(restricted_dir, recursive = TRUE, showWarnings = FALSE)
+
+duplicate_name_review_internal <- crm |>
+  filter(duplicate_name_candidate == "TRUE") |>
+  arrange(name_key, company_name, email) |>
+  select(
+    source_record_number, id, full_name, first_name, last_name, email,
+    company_name, name_key, email_key, school_name_key
+  )
+
+data_quality_review_internal <- crm |>
+  filter(
+    structure_issue == "TRUE" |
+      duplicate_crm_id_candidate == "TRUE" |
+      duplicate_email_candidate == "TRUE" |
+      email_format_valid == "FALSE" |
+      full_name_component_mismatch == "TRUE" |
+      australian_postcode_format_valid == "FALSE"
+  ) |>
+  select(
+    source_record_number, id, full_name, first_name, last_name, email,
+    postal_zip, company_name, structure_issue,
+    duplicate_crm_id_candidate, duplicate_email_candidate,
+    email_format_valid, full_name_component_mismatch,
+    australian_postcode_format_valid
+  )
+
+aggregate_outputs <- list(
+  crm_record_summary = crm_record_summary,
+  crm_duplicate_summary = duplicate_summary,
+  crm_duplicate_name_group_summary = duplicate_name_group_summary,
+  crm_validity_summary = validity_summary,
+  crm_school_name_consistency_summary = school_name_consistency_summary,
+  crm_selected_field_completeness = crm_selected_field_completeness,
+  crm_completeness_bands = crm_completeness_bands
+)
+
+iwalk(
+  aggregate_outputs,
+  ~ write_csv(.x, file.path(output_dir, paste0(.y, ".csv")), na = "")
+)
+
+write_csv(
+  duplicate_name_review_internal,
+  file.path(restricted_dir, "crm_duplicate_name_review_internal.csv"),
+  na = ""
+)
+
+write_csv(
+  data_quality_review_internal,
+  file.path(restricted_dir, "crm_data_quality_review_internal.csv"),
+  na = ""
+)
+```
+
+# 9 Handoff
+
+Report 02 completes the record-volume, duplicate, technical-validity and
+selected-variable completeness analysis. The next report will focus on school
+names, Group Admin, Group Member and Neither classifications.

@@ -1,0 +1,628 @@
+---
+title: "CRM health check summary and recommendations"
+subtitle: "Data quality school groups and membership reconciliation"
+author: "Jordan"
+date: today
+format:
+  html:
+    toc: true
+    toc-depth: 2
+    number-sections: false
+    code-fold: true
+    embed-resources: true
+execute:
+  warning: false
+  message: false
+---
+
+# Executive summary
+
+This report consolidates the completed CRM health-check work from the data
+quality, school-group and membership reports. The analysis uses the 29 July
+2026 CRM extract and the 25 agreed business variables.
+
+The CRM contains 6,051 contact records with unique CRM IDs and unique normalised
+email addresses. No exact duplicate rows, duplicate CRM IDs or duplicate emails
+were found. However, 1,379 contacts belong to same-name groups and require
+manual review rather than automatic merging.
+
+The main issues are incomplete optional and segmentation fields, inconsistent
+school or organisation names, group-role contacts without an organisation, and
+differences between membership status and membership tags. Active and dormant
+relationship analysis is not included because the selected variables do not
+contain a reliable last-contact or engagement measure.
+
+# 1 Scope and source reports
+
+```{r}
+library(tidyverse)
+library(here)
+
+options(scipen = 999)
+here::i_am("reports/CRM/06_crm_summary_recommendations.qmd")
+
+quality_dir <- here("data", "analysis", "CRM", "02_data_quality")
+groups_dir <- here("data", "analysis", "CRM", "03_school_groups")
+membership_dir <- here("data", "analysis", "CRM", "04_membership")
+
+required_files <- c(
+  file.path(quality_dir, "crm_record_summary.csv"),
+  file.path(quality_dir, "crm_duplicate_summary.csv"),
+  file.path(quality_dir, "crm_duplicate_name_group_summary.csv"),
+  file.path(quality_dir, "crm_validity_summary.csv"),
+  file.path(quality_dir, "crm_selected_field_completeness.csv"),
+  file.path(groups_dir, "crm_group_tag_presence_summary.csv"),
+  file.path(groups_dir, "crm_school_group_coverage.csv"),
+  file.path(groups_dir, "crm_missing_school_group_summary.csv"),
+  file.path(groups_dir, "crm_school_name_variant_summary.csv"),
+  file.path(groups_dir, "crm_school_name_fuzzy_candidates.csv"),
+  file.path(membership_dir, "crm_membership_status_summary.csv"),
+  file.path(membership_dir, "crm_membership_count_comparison.csv"),
+  file.path(membership_dir, "crm_membership_comparison_summary.csv"),
+  file.path(membership_dir, "crm_membership_supporting_checks.csv"),
+  file.path(membership_dir, "crm_membership_group_summary.csv"),
+  file.path(membership_dir, "crm_membership_plan_distinct_summary.csv"),
+  file.path(membership_dir, "crm_organisation_membership_total.csv"),
+  file.path(membership_dir, "crm_organisation_status_summary.csv"),
+  file.path(membership_dir, "crm_organisation_type_summary.csv"),
+  file.path(membership_dir, "crm_organisation_membership.csv"),
+  file.path(groups_dir, "crm_school_name_standardisation_summary.csv"),
+  file.path(groups_dir, "crm_school_name_standardisation_examples.csv"),
+  file.path(groups_dir, "crm_school_name_review_method_summary.csv")
+)
+
+stopifnot(all(file.exists(required_files)))
+
+record_summary <- read_csv(required_files[1], show_col_types = FALSE)
+duplicate_summary <- read_csv(required_files[2], show_col_types = FALSE)
+duplicate_name_summary <- read_csv(required_files[3], show_col_types = FALSE)
+validity_summary <- read_csv(required_files[4], show_col_types = FALSE)
+field_completeness <- read_csv(required_files[5], show_col_types = FALSE)
+group_tag_presence_summary <- read_csv(required_files[6], show_col_types = FALSE)
+school_group_coverage <- read_csv(required_files[7], show_col_types = FALSE)
+missing_school_groups <- read_csv(required_files[8], show_col_types = FALSE)
+school_variant_summary <- read_csv(required_files[9], show_col_types = FALSE)
+school_fuzzy_candidates <- read_csv(required_files[10], show_col_types = FALSE)
+membership_status_summary <- read_csv(required_files[11], show_col_types = FALSE)
+membership_count_comparison <- read_csv(required_files[12], show_col_types = FALSE)
+membership_comparison_summary <- read_csv(required_files[13], show_col_types = FALSE)
+membership_supporting_checks <- read_csv(required_files[14], show_col_types = FALSE)
+membership_group_summary <- read_csv(required_files[15], show_col_types = FALSE)
+membership_plan_distinct_summary <- read_csv(required_files[16], show_col_types = FALSE)
+organisation_membership_total <- read_csv(required_files[17], show_col_types = FALSE)
+organisation_status_summary <- read_csv(required_files[18], show_col_types = FALSE)
+organisation_type_summary <- read_csv(required_files[19], show_col_types = FALSE)
+organisation_membership <- read_csv(required_files[20], show_col_types = FALSE)
+school_name_standardisation_summary <- read_csv(required_files[21], show_col_types = FALSE)
+school_name_standardisation_examples <- read_csv(required_files[22], show_col_types = FALSE)
+school_name_review_method_summary <- read_csv(required_files[23], show_col_types = FALSE)
+```
+
+Completed reports:
+
+- Report 01 prepares and validates the reusable CRM data.
+- Report 02 analyses record volume, duplicates, validity and completeness.
+- Report 03 analyses school names and Group Admin or Group Member coverage.
+- Report 04 compares membership status with membership tags.
+- Report 05 is intentionally omitted because no reliable contact-activity data
+  is available.
+
+# 2 Status of the CRM health-check questions
+
+```{r}
+crm_health_check_status <- tribble(
+  ~question, ~status, ~current_result,
+  "How many records do we have?", "Completed",
+  "6,051 CRM contact records.",
+  "How many are duplicates?", "Completed",
+  "No exact rows, CRM IDs or emails are duplicated; 1,379 same-name contacts require review.",
+  "How complete is the data?", "Completed",
+  "Completeness is reported for all 25 approved variables.",
+  "How accurate or current is the data?", "Partially completed",
+  "Technical checks are complete; real-world accuracy and recency require business review.",
+  "How many people are genuinely active?", "Not measurable",
+  "The selected data has no reliable last-contact or engagement field.",
+  "How many people are dormant?", "Not measurable",
+  "The selected data has no reliable last-contact or engagement field.",
+  "Can audiences be segmented reliably?", "Partially completed",
+  "Available segmentation fields are profiled, but several have low completeness.",
+  "Can engagement be measured per record?", "Not measurable",
+  "No dated event, email or website engagement data is included."
+)
+
+knitr::kable(
+  crm_health_check_status,
+  col.names = c("Health-check question", "Status", "Current result"),
+  align = c("l", "l", "l")
+)
+```
+
+The table is based on the outputs of Reports 02, 03 and 04. `Completed` means the available 25-variable extract
+supports the requested calculation. `Partially completed` means technical
+evidence is available but business confirmation is still required. `Not
+measurable` means the necessary activity field is absent and no proxy has been
+substituted.
+
+# 3 Data quality findings
+
+## 3.1 Record and duplicate summary
+
+```{r}
+record_summary |>
+  knitr::kable(
+    col.names = c("Metric", "Records"),
+    align = c("l", "r")
+  )
+
+duplicate_summary |>
+  mutate(
+    percentage_of_contacts = scales::percent(
+      percentage_of_contacts,
+      accuracy = 0.1
+    )
+  ) |>
+  knitr::kable(
+    col.names = c("Duplicate check", "Flagged records", "Percentage"),
+    align = c("l", "r", "r")
+  )
+```
+
+The first table is based on `id`, `email_key`, `company_name`,
+`membership_status` and `membership_plan`. Each row uses the following logic:
+
+- **Contact records:** The CRM extract contains 6,051 contact records in total.
+- **Distinct CRM IDs:** All 6,051 records have a unique CRM ID.
+- **Distinct normalised emails:** All 6,051 records have a unique email after
+  lowercase and whitespace standardisation.
+- **Records with a school or organisation:** 3,934 contact records contain a
+  non-missing `company_name`. This is a contact count, not a count of unique
+  organisations.
+- **Records with membership status:** 1,038 contact records contain a value in
+  `membership_status`. This includes all status categories and is not the number
+  of Active members.
+- **Records with membership plan:** 1,196 contact records contain a value in
+  `membership_plan`. This is not the number of distinct plan types.
+
+The second table applies four duplicate checks. Same-name records are review
+candidates only; the zero ID and email results do not prove that the same person
+never used two different identifiers.
+
+No records should be merged solely because first and last names match. The 566
+same-name groups all contain more than one email, and 155 groups are associated
+with more than one school or organisation.
+
+## 3.2 Technical validity
+
+```{r}
+validity_summary |>
+  mutate(
+    percentage_of_contacts = scales::percent(
+      percentage_of_contacts,
+      accuracy = 0.1
+    )
+  ) |>
+  knitr::kable(
+    col.names = c("Quality check", "Flagged records", "Percentage"),
+    align = c("l", "r", "r")
+  )
+```
+
+The table is based on the validation flags created in Report 01. Each row counts records failing one technical rule.
+A zero indicates no problem detected by that rule, not independent verification
+of the real-world value. Rows may overlap and should not be summed as unique
+contacts.
+
+CRM IDs and email formats are complete under the available technical checks.
+The immediate technical review population consists of four invalid non-missing
+postcodes and three parser-affected records.
+
+## 3.3 Completeness
+
+```{r}
+field_completeness |>
+  mutate(
+    completion_rate = scales::percent(completion_rate, accuracy = 0.1)
+  ) |>
+  arrange(position) |>
+  select(field, records_populated, missing_records, completion_rate) |>
+  knitr::kable(
+    col.names = c("Field", "Populated", "Missing", "Completion rate"),
+    align = c("l", "r", "r", "r")
+  )
+```
+
+The table is based on the 25 approved source fields. For each field, completion rate is the share of all 6,051 contacts
+with a populated value after cleaning. It measures presence only, not accuracy
+or whether a field should apply to every type of contact.
+
+Thirteen of the 25 approved variables are below 50% complete. Low completion
+does not automatically mean poor quality: membership fields may be blank for
+non-members, and the leadership `Other` field should be blank unless `Other` is
+selected. STAV should identify which fields are required for each contact type
+before setting completeness targets.
+
+# 4 School and group findings
+
+## 4.1 Contact group roles
+
+```{r}
+group_tag_presence_summary |>
+  mutate(
+    percentage_of_contacts = scales::percent(
+      percentage_of_contacts,
+      accuracy = 0.1
+    )
+  ) |>
+  knitr::kable(
+    col.names = c("Tag presence", "Contacts", "Percentage"),
+    align = c("l", "r", "r")
+  )
+```
+
+This table is based on the Group Admin and Group Member flags derived from
+`tags`. The Group Admin count includes Admin-only and Both contacts; the Group
+Member count includes Member-only and Both contacts. The totals overlap and
+must not be added together as a unique-contact total. Each percentage uses all
+6,051 CRM contacts as the denominator, and the overlapping rows therefore do
+not sum to 100%.
+
+## 4.2 Organisation-level coverage
+
+```{r}
+school_group_coverage |>
+  knitr::kable(
+    col.names = c(
+      "Population", "Distinct organisations",
+      "Organisations with no Group Admin",
+      "Organisations with multiple Group Admins",
+      "Organisations with no Group Member",
+      "Organisations containing Neither contacts only"
+    ),
+    align = c("l", "r", "r", "r", "r", "r")
+  )
+```
+
+The tables are based on `company_name` and the Group role flags derived from
+`tags`. Coverage indicators identify organisations that
+may require role review; they are not automatic errors. The second table counts
+group-role contacts with no organisation, who cannot yet be included reliably
+in an organisation-level assessment.
+
+Among 323 organisations with at least one group-role tag, 46 have no Group
+Admin, 15 have multiple Group Admins and 136 have no Group Member. In addition,
+183 contacts carry a group-role tag but have no `company_name`, so they cannot
+be allocated reliably to an organisation.
+
+## 4.3 School-name consistency
+
+```{r}
+school_name_standardisation_examples |>
+  knitr::kable(align = c("l", "l", "r"))
+```
+
+The table shows 10 actual transformations from the 1,487 distinct supplied
+`company_name` values to the standardised `school_name_key` values. Across the
+full data, basic cleaning reduces 1,487 supplied names to 1,301 distinct keys, a
+reduction of 186. The cleaning function converts text to
+lowercase, removes leading, trailing and repeated whitespace, removes
+characters other than letters, numbers and spaces, and collapses whitespace
+again. It does not expand abbreviations, correct spelling or remove words such
+as School, College or Campus.
+
+```{r}
+school_name_review_method_summary |>
+  knitr::kable(
+    col.names = c("Review measure", "Result", "Calculation rule"),
+    align = c("l", "r", "l")
+  )
+```
+
+The 156 variant keys are obtained by grouping records by `school_name_key`,
+counting distinct supplied `company_name` values within each key and retaining
+keys with more than one supplied value. The 489 fuzzy candidates are pairs of
+different keys, not 489 confirmed duplicates. Keys shorter than six characters
+are excluded, remaining names must share the same first three characters, and
+a pair is retained when its normalised Levenshtein edit distance is no more
+than 20% or one standardised name contains the other. These candidates require
+manual review because similar names may represent different campuses or
+organisations.
+
+
+not finish
+
+# 5 Membership findings
+
+## 5.1 Membership status and tag totals
+
+```{r}
+membership_count_comparison |>
+  knitr::kable(
+    col.names = c(
+      "Category", "Membership status", "Tag classification",
+      "Tag minus status", "Absolute difference"
+    ),
+    align = c("l", "r", "r", "r", "r")
+  )
+```
+
+The table is based on `membership_status_clean` and `membership_tag_status`.
+Status and tag counts are independently calculated
+for the same three categories. `Tag minus status` shows the net count
+difference, but record-level review is required to distinguish missing values
+from category conflicts.
+
+The tag classification follows the requested Active, On-hold, Expired priority
+order. Independent tag counts are available in Report 04 for contacts carrying
+multiple selected membership tags.
+
+## 5.2 Record-level agreement
+
+```{r}
+membership_comparison_summary |>
+  mutate(
+    percentage_of_contacts = scales::percent(
+      percentage_of_contacts,
+      accuracy = 0.1
+    )
+  ) |>
+  knitr::kable(
+    col.names = c("Comparison result", "Contacts", "Percentage"),
+    align = c("l", "r", "r")
+  )
+
+membership_supporting_checks |>
+  knitr::kable(
+    col.names = c("Supporting check", "Contacts"),
+    align = c("l", "r")
+  )
+```
+
+The first table compares `membership_status_clean` with
+`membership_tag_status` separately for every contact. Only Active, On-hold and
+Expired are treated as comparable because they are the three categories that
+exist in both the selected status and tag analysis.
+
+For each contact, the calculation first asks whether the status is one of these
+three categories and whether the tag classification is one of these three
+categories. The contact is then placed into exactly one result:
+
+- `Status and tag agree`: both fields contain a comparable category and the two
+  values are the same, such as Active plus Active.
+- `Status and tag disagree`: both fields contain a comparable category but the
+  values differ, such as Active plus Expired.
+- `Selected status but no selected tag`: the status is Active, On-hold or
+  Expired, but no comparable tag classification exists.
+- `Selected tag but no comparable status`: a selected membership tag exists,
+  but status is blank or contains another value such as Cancelled.
+- `Neither source has a comparable category`: neither field contains Active,
+  On-hold or Expired. This does not necessarily mean both original fields are
+  blank; for example, Cancelled status with no selected tag belongs here.
+
+The five rows are mutually exclusive and add to all 6,051 contacts. The second
+table is separate: it reports whether plan and date fields are populated and
+flags date inconsistencies. Active with a past end date is a review condition,
+not an automatic membership decision.
+
+The main review populations are:
+
+- 90 contacts with an Active, On-hold or Expired status but no corresponding
+  selected tag.
+- 32 contacts with a selected tag but no directly comparable status.
+- 11 contacts whose selected status and priority tag classification disagree.
+- 11 contacts carrying more than one selected membership tag.
+- 49 contacts labelled Active whose subscription end date precedes the extract
+  date.
+
+## 5.3 Membership group
+
+```{r}
+membership_group_summary |>
+  mutate(
+    percentage_of_contacts = scales::percent(
+      percentage_of_contacts,
+      accuracy = 0.1
+    )
+  ) |>
+  knitr::kable(
+    col.names = c("Membership group", "Contacts", "Percentage"),
+    align = c("l", "r", "r")
+  )
+```
+
+The table is based only on `membership_plan_clean`, and every contact is counted
+once. `Organisation` is Organisation - Group Membership. `School membership`
+combines Primary School, Secondary School and P-12 School Group Membership.
+`Individual` contains every other non-blank plan, including teacher, student
+teacher, academic, technician, life and retired plans. `Blank` means no
+membership plan is recorded. Membership status is deliberately not used, so
+membership type and membership activity remain separate concepts.
+
+```{r}
+membership_plan_distinct_summary |>
+  mutate(
+    percentage_of_contacts = scales::percent(
+      percentage_of_contacts,
+      accuracy = 0.1
+    )
+  ) |>
+  knitr::kable(
+    col.names = c("Distinct membership plan", "Contacts", "Percentage"),
+    align = c("l", "r", "r")
+  )
+```
+
+This second table is based directly on the original `membership_plan` field,
+not only `membership_plan_clean`. It shows every distinct supplied plan value
+and displays missing values as Blank. These detailed plan counts are the source
+values underlying the four broader groups above.
+
+## 5.4 Organisation-level membership
+
+```{r}
+organisation_membership_total |>
+  knitr::kable(
+    col.names = c("Metric", "Organisations"),
+    align = c("l", "r")
+  )
+
+organisation_status_summary |>
+  knitr::kable(
+    col.names = c("Organization status", "Organisations"),
+    align = c("l", "r")
+  )
+
+organisation_type_summary |>
+  knitr::kable(
+    col.names = c("Organization type", "Organisations"),
+    align = c("l", "r")
+  )
+
+organisation_membership |>
+  slice_head(n = 10) |>
+  knitr::kable(align = c("l", "l", "l", "l"))
+```
+
+The summary tables count all organisations, first as a total and then by
+`Organization status` and `Organization type`. The two breakdowns describe
+different attributes and should not be added together. The detail table
+displays the first 10 organisations in alphabetical order as a preview; the
+complete organisation-level dataset is saved as a CSV file. The complete table
+has one row per non-blank standardised `school_name_key`.
+`Organization name` is the most frequently occurring non-blank `company_name`
+for that key. `Organization status` is Active if at least one associated
+contact has `membership_status_clean` equal to Active; otherwise it is Not
+active, including organisations with no recorded membership. `Organization
+plan` lists the distinct school or organisation group plans among its contacts,
+or No group membership plan when none is recorded. `Organization type` is
+School when a school group plan is present, Organisation when an Organisation -
+Group Membership plan is present without a school group plan, and Unknown when
+neither type can be established.
+
+<!--
+# 6 Recommendations
+
+## 6.1 High impact and low effort
+
+```{r}
+#| include: false
+crm_recommendations <- tribble(
+  ~priority, ~recommendation, ~evidence, ~proposed_action,
+  "High impact / low effort",
+  "Resolve technical data errors",
+  "Four invalid non-missing postcodes and three parser-affected records.",
+  "Review the seven restricted records and correct confirmed source errors.",
+  "High impact / low effort",
+  "Review membership conflicts",
+  "Eleven status-tag disagreements, eleven multi-tag contacts and 49 Active records with past end dates.",
+  "Confirm the intended status and remove or update obsolete membership tags.",
+  "High impact / low effort",
+  "Complete organisation names for group contacts",
+  "183 Group Admin or Group Member contacts have no company name.",
+  "Assign a verified school or organisation where one can be established.",
+  "High impact / low effort",
+  "Confirm required fields by contact type",
+  "Thirteen selected fields are below 50% complete, but some blanks are legitimate.",
+  "Define required fields separately for members, non-members and group contacts.",
+  "Medium impact",
+  "Create an approved school-name mapping",
+  "156 basic variant groups and 489 fuzzy candidate pairs require review.",
+  "Approve a source-name to standard-name table without overwriting raw values.",
+  "Medium impact",
+  "Review group-role coverage",
+  "Among group-tagged organisations, 46 have no Admin, 15 have multiple Admins and 136 have no Member.",
+  "Confirm whether each case is valid and update group-role tags where needed.",
+  "Medium impact",
+  "Reconcile missing status or tag categories",
+  "Ninety contacts have a selected status without a tag and 32 have a tag without a comparable status.",
+  "Document the authoritative membership field and synchronisation rule.",
+  "Long-term opportunity",
+  "Add controlled validation at data entry",
+  "School names, postcodes, group roles and membership fields currently require retrospective checks.",
+  "Use controlled lists and validation rules in the CRM input process.",
+  "Long-term opportunity",
+  "Automate recurring CRM quality monitoring",
+  "The current reports provide repeatable checks for future exports.",
+  "Schedule periodic refreshes and review changes in key quality measures.",
+  "Long-term opportunity",
+  "Collect dated engagement activity only if required",
+  "The selected variables cannot measure active or dormant relationships.",
+  "If STAV needs this measure, define qualifying interactions and capture a reliable last-activity date."
+)
+
+crm_recommendations |>
+  filter(priority == "High impact / low effort") |>
+  select(recommendation, evidence, proposed_action) |>
+  knitr::kable(
+    col.names = c("Recommendation", "Evidence", "Proposed action"),
+    align = c("l", "l", "l")
+  )
+```
+
+Each recommendation is based on the measured findings in Reports 02, 03 and 04.
+These actions combine a material data-quality issue
+with a relatively contained review or correction effort. Evidence gives the
+current measured scope; the proposed action still requires confirmation before
+source CRM records are changed.
+
+## 6.2 Medium impact
+
+```{r}
+#| include: false
+crm_recommendations |>
+  filter(priority == "Medium impact") |>
+  select(recommendation, evidence, proposed_action) |>
+  knitr::kable(
+    col.names = c("Recommendation", "Evidence", "Proposed action"),
+    align = c("l", "l", "l")
+  )
+```
+
+Each row links a measured issue to a proposed action. These actions require broader business review,
+mapping or process decisions. They should follow the immediate technical and
+record-level corrections.
+
+## 6.3 Long-term opportunities
+
+```{r}
+#| include: false
+crm_recommendations |>
+  filter(priority == "Long-term opportunity") |>
+  select(recommendation, evidence, proposed_action) |>
+  knitr::kable(
+    col.names = c("Recommendation", "Evidence", "Proposed action"),
+    align = c("l", "l", "l")
+  )
+```
+
+Each row is based on a recurring limitation identified in the current pipeline.
+These are process and system improvements rather
+than corrections to the current extract. They require ownership, implementation
+planning and an agreed recurring workflow.
+-->
+
+```{r}
+#| include: false
+output_dir <- here("data", "analysis", "CRM", "06_summary")
+dir.create(output_dir, recursive = TRUE, showWarnings = FALSE)
+
+write_csv(
+  crm_health_check_status,
+  file.path(output_dir, "crm_health_check_status.csv"),
+  na = ""
+)
+
+write_csv(
+  crm_recommendations,
+  file.path(output_dir, "crm_recommendations.csv"),
+  na = ""
+)
+```
+
+# Conclusion
+
+The current CRM export supports a repeatable audit of identifiers,
+completeness, group-role coverage and membership consistency. The immediate
+priority is to resolve the small number of technical errors, review membership
+conflicts, complete missing organisations for group contacts and establish an
+approved school-name mapping. Active and dormant relationship analysis has been
+excluded because the available data cannot support a defensible classification.

@@ -41,8 +41,9 @@ rsconnect/
 # STAV Confidential Data
 # ==============================
 
-# All local project data
-data/
+# All confidential and generated project data
+data/**
+
 
 # Additional private data directories
 raw_data/
@@ -71,3 +72,14 @@ private_data/
 *.log
 *.save
 *~
+
+# Rendered Quarto reports
+reports/**/*.html
+reports/**/*_files/
+
+# Previous working copies
+reports/CRM/*.original.qmd
+
+# Allow fictional example data
+!data/example/
+!data/example/**

@@ -1,0 +1,665 @@
+---
+title: "CRM data preparation"
+subtitle: "Import cleaning standardisation and reusable validation flags"
+author: "Jordan"
+date: today
+format:
+  html:
+    toc: true
+    toc-depth: 2
+    number-sections: true
+    code-fold: true
+    embed-resources: true
+execute:
+  warning: false
+  message: false
+---
+
+# Purpose
+
+This report creates the reusable cleaned CRM contact dataset used by all later
+CRM analyses. It imports every source field, standardises values, adds technical
+validation flags and saves record-level data in the restricted output folder.
+
+This report does not interpret business results. Record counts, duplicate
+analysis, completeness, school groups, membership analysis and contact activity
+are handled in later reports.
+
+# 1 Setup and source contract
+
+```{r}
+library(tidyverse)
+library(lubridate)
+library(janitor)
+library(here)
+
+options(scipen = 999)
+
+here::i_am("reports/CRM/01_crm_cleaning.qmd")
+
+crm_file <- here("data", "raw", "CRM", "CRM20260729.csv")
+extract_date <- as.Date("2026-07-29")
+
+stopifnot(file.exists(crm_file))
+```
+
+# 2 Import all source fields
+
+All fields are imported as text so that identifiers, phone numbers and mixed
+date formats are not altered by automatic type guessing.
+
+```{r}
+crm_raw <- suppressWarnings(
+  read_csv(
+    crm_file,
+    col_types = cols(.default = col_character()),
+    trim_ws = FALSE,
+    name_repair = "minimal",
+    show_col_types = FALSE,
+    progress = FALSE,
+    lazy = FALSE
+  )
+)
+
+source_record_count <- nrow(crm_raw)
+source_field_count <- ncol(crm_raw)
+source_column_names <- names(crm_raw)
+source_exact_duplicate_rows <- sum(duplicated(crm_raw))
+
+crm_parse_problems <- problems(crm_raw)
+problem_record_numbers <- sort(unique(crm_parse_problems$row - 1L))
+
+crm_import_validation <- tibble(
+  check = c(
+    "Source records",
+    "Source fields",
+    "Parser problem entries",
+    "Affected source records",
+    "Exact duplicate source rows"
+  ),
+  result = c(
+    source_record_count,
+    source_field_count,
+    nrow(crm_parse_problems),
+    length(problem_record_numbers),
+    source_exact_duplicate_rows
+  )
+)
+
+crm_import_validation
+```
+
+The table is based on the raw 71-field CRM import. The rows document the size and structural condition
+of the raw import before cleaning. Parser entries and affected records are not
+the same measure because one record can generate more than one parser entry.
+Exact duplicates require all 71 source fields to match.
+
+# 3 Standardise structure and missing values
+
+## 3.1 Standardise column names and add audit fields
+
+```{r}
+crm_clean <- crm_raw |>
+  clean_names() |>
+  mutate(
+    source_record_number = row_number(),
+    structure_issue = source_record_number %in% problem_record_numbers,
+    .before = 1
+  )
+
+source_fields_clean_names <- names(crm_clean)[
+  !names(crm_clean) %in% c("source_record_number", "structure_issue")
+]
+
+stopifnot(length(source_fields_clean_names) == source_field_count)
+```
+
+## 3.2 Clean whitespace and blank strings
+
+```{r}
+crm_clean <- crm_clean |>
+  mutate(
+    across(
+      all_of(source_fields_clean_names),
+      ~ .x |> str_squish() |> na_if("")
+    )
+  )
+```
+
+## 3.3 Quarantine structurally unreliable values
+
+For parser-affected rows, values from `notes` onward are not reliable. Those
+values are set to missing, while earlier contact fields and the source row are
+retained for traceability.
+
+```{r}
+post_notes_fields <- source_fields_clean_names[
+  match("notes", source_fields_clean_names):
+    match("company_department", source_fields_clean_names)
+]
+
+crm_clean <- crm_clean |>
+  mutate(
+    across(
+      all_of(post_notes_fields),
+      ~ if_else(structure_issue, NA_character_, .x)
+    )
+  )
+```
+
+## 3.4 Convert known missing-value placeholders
+
+`No` is converted to missing only in fields where it represents information
+that was not supplied. Genuine yes/no response fields are not changed.
+
+```{r}
+no_as_missing_fields <- intersect(
+  c(
+    "birthday", "mobile_phone", "primary_phone",
+    "primary_phone_extension", "street_address_1", "street_address_2",
+    "city", "postal_zip", "region", "country", "time_zone",
+    "ip_address", "lead_source", "source_page", "gdpr_consent_date",
+    "marketing_consent_date", "notes", "tags",
+    "utm_campaign", "utm_content", "utm_medium", "utm_term", "utm_source",
+    "unsub_date", "unsub_reason", "unsub_feedback",
+    "membership_status", "membership_plan", "subscription_start_date",
+    "subscription_end_date", "date_of_cancellation",
+    "reason_for_cancellation", "if_other", "date_retired", "year_level",
+    "subjects", "job_title_position",
+    "do_you_hold_an_identified_leadership_role_other",
+    "your_role", "last_sponsorship_purchase", "sponsorships_details_sections",
+    "sponsorship_details_divisions", "supporting_sponsorships",
+    "company_name", "company_website", "company_address", "company_phone",
+    "company_phone_extension", "job_title", "company_department"
+  ),
+  names(crm_clean)
+)
+
+no_to_na <- function(x) {
+  if_else(
+    !is.na(x) & str_to_lower(str_squish(x)) == "no",
+    NA_character_,
+    x
+  )
+}
+
+crm_clean <- crm_clean |>
+  mutate(across(all_of(no_as_missing_fields), no_to_na))
+```
+
+# 4 Create reusable comparison keys
+
+Keys are added for matching and validation without overwriting original CRM
+values.
+
+```{r}
+normalise_name_part <- function(x) {
+  x |>
+    str_to_lower() |>
+    str_squish() |>
+    str_replace_all("[^[:alnum:]]", "")
+}
+
+normalise_school_name <- function(x) {
+  x |>
+    str_to_lower() |>
+    str_squish() |>
+    str_replace_all("[^[:alnum:] ]", "") |>
+    str_squish()
+}
+
+crm_clean <- crm_clean |>
+  mutate(
+    email_key = email |> str_to_lower() |> str_squish(),
+    first_name_key = normalise_name_part(first_name),
+    last_name_key = normalise_name_part(last_name),
+    name_key = case_when(
+      !is.na(first_name_key) & !is.na(last_name_key) ~
+        str_c(first_name_key, last_name_key, sep = "|"),
+      TRUE ~ NA_character_
+    ),
+    supplied_full_name_key = normalise_name_part(full_name),
+    constructed_full_name_key = case_when(
+      !is.na(first_name_key) & !is.na(last_name_key) ~
+        str_c(first_name_key, last_name_key),
+      TRUE ~ NA_character_
+    ),
+    school_name_key = normalise_school_name(company_name),
+    tags_key = tags |> str_to_lower() |> str_squish()
+  )
+```
+
+# 5 Standardise reusable contact and location fields
+
+The source does not contain a field literally named `suburb`. `city` is retained
+as `suburb_candidate` for later business confirmation. A preferred phone field
+uses mobile first and primary phone second without discarding either source
+field.
+
+```{r}
+normalise_phone <- function(x) {
+  digits <- str_replace_all(x, "[^0-9+]", "")
+  na_if(digits, "")
+}
+
+normalise_region <- function(x) {
+  key <- x |> str_to_lower() |> str_squish()
+
+  case_when(
+    key %in% c("vic", "victoria") ~ "VIC",
+    key %in% c("nsw", "new south wales") ~ "NSW",
+    key %in% c("qld", "queensland") ~ "QLD",
+    key %in% c("act", "australian capital territory") ~ "ACT",
+    key %in% c("sa", "south australia") ~ "SA",
+    key %in% c("wa", "western australia") ~ "WA",
+    key %in% c("tas", "tasmania") ~ "TAS",
+    key %in% c("nt", "northern territory") ~ "NT",
+    key == "metro" ~ "Metro",
+    key == "country" ~ "Country",
+    is.na(key) ~ NA_character_,
+    TRUE ~ str_to_title(key)
+  )
+}
+
+crm_clean <- crm_clean |>
+  mutate(
+    mobile_phone_clean = normalise_phone(mobile_phone),
+    primary_phone_clean = normalise_phone(primary_phone),
+    preferred_phone = coalesce(mobile_phone_clean, primary_phone_clean),
+    suburb_candidate = city,
+    region_clean = normalise_region(region),
+    postal_zip_clean = postal_zip |> str_replace_all("[^0-9]", "") |> na_if(""),
+    lead_source_clean = lead_source |> str_to_lower() |> str_squish()
+  )
+```
+
+# 6 Parse reusable date fields
+
+```{r}
+parse_crm_date <- function(x) {
+  as.Date(
+    suppressWarnings(
+      parse_date_time(
+        x,
+        orders = c(
+          "ymd HMS", "ymd HM", "ymd",
+          "dmy HMS", "dmy HM", "dmy",
+          "mdy HMS", "mdy HM", "mdy",
+          "B d Y IMS p", "B d Y IM p"
+        ),
+        tz = "Australia/Melbourne",
+        quiet = TRUE
+      )
+    )
+  )
+}
+
+date_fields <- intersect(
+  c(
+    "date_created", "date_optin_status_changed", "gdpr_consent_date",
+    "marketing_consent_date", "unsub_date", "subscription_start_date",
+    "subscription_end_date", "date_of_cancellation", "date_retired",
+    "last_sponsorship_purchase"
+  ),
+  names(crm_clean)
+)
+
+crm_clean <- crm_clean |>
+  mutate(
+    across(
+      all_of(date_fields),
+      parse_crm_date,
+      .names = "{.col}_clean"
+    )
+  )
+
+crm_date_parse_validation <- map_dfr(date_fields, function(field_name) {
+  raw_values <- crm_clean[[field_name]]
+  clean_values <- crm_clean[[paste0(field_name, "_clean")]]
+
+  tibble(
+    field = field_name,
+    non_missing_raw = sum(!is.na(raw_values)),
+    successfully_parsed = sum(!is.na(clean_values)),
+    parse_failures = sum(!is.na(raw_values) & is.na(clean_values)),
+    earliest_date = if (all(is.na(clean_values))) {
+      as.Date(NA)
+    } else {
+      min(clean_values, na.rm = TRUE)
+    },
+    latest_date = if (all(is.na(clean_values))) {
+      as.Date(NA)
+    } else {
+      max(clean_values, na.rm = TRUE)
+    }
+  )
+})
+
+crm_date_parse_validation
+```
+
+The table is based on each available source date field and its corresponding
+`_clean` field. Each row compares populated source date values with
+successfully parsed clean dates. A parse failure means a non-missing source
+value could not be converted using the supported formats; it does not by itself
+show whether the source date is factually correct.
+
+# 7 Standardise membership source values
+
+This section standardises source values for reuse. Membership interpretation
+and reporting are performed in `04_crm_membership_analysis.qmd`.
+
+```{r}
+normalise_membership_status <- function(x) {
+  key <- x |>
+    str_to_lower() |>
+    str_squish() |>
+    str_replace_all("[ _]", "-")
+
+  case_when(
+    key %in% c(
+      "active", "on-hold", "expired", "cancelled", "pending-cancel",
+      "paused", "pending"
+    ) ~ key,
+    is.na(key) ~ NA_character_,
+    TRUE ~ "review-unmapped"
+  )
+}
+
+normalise_membership_plan <- function(x) {
+  x |>
+    str_replace_all("[–—]", "-") |>
+    str_replace_all("\\s*-\\s*", " - ") |>
+    str_squish()
+}
+
+crm_clean <- crm_clean |>
+  mutate(
+    membership_status_clean = normalise_membership_status(membership_status),
+    membership_plan_clean = normalise_membership_plan(membership_plan)
+  )
+```
+
+## 7.2 Classify membership tags
+
+The three requested membership tags are converted into a reusable category.
+The classification follows the agreed priority order: Active, On-hold, then
+Expired. Separate flags are retained so later analysis can identify contacts
+carrying more than one of these tags.
+
+```{r}
+crm_clean <- crm_clean |>
+  mutate(
+    membership_tag_active = str_detect(
+      coalesce(tags, ""),
+      regex("\\[MEMBERSHIP\\] ACTIVE", ignore_case = TRUE)
+    ),
+    membership_tag_on_hold = str_detect(
+      coalesce(tags, ""),
+      regex("\\[MEMBERSHIP\\] ON-HOLD", ignore_case = TRUE)
+    ),
+    membership_tag_expired = str_detect(
+      coalesce(tags, ""),
+      regex("\\[MEMBERSHIP\\] EXPIRED", ignore_case = TRUE)
+    ),
+    membership_tag_status = case_when(
+      membership_tag_active ~ "active",
+      membership_tag_on_hold ~ "on-hold",
+      membership_tag_expired ~ "expired",
+      TRUE ~ NA_character_
+    ),
+    membership_tag_category_count =
+      as.integer(membership_tag_active) +
+      as.integer(membership_tag_on_hold) +
+      as.integer(membership_tag_expired),
+    multiple_membership_tag_categories = membership_tag_category_count > 1L
+  )
+```
+
+## 7.3 Create the analysis-ready variable set
+
+All 71 source fields remain in `crm_clean` for audit purposes. The downstream
+analysis dataset is restricted to the 25 agreed business variables, plus audit,
+standardised and validation fields created by this report.
+
+```{r}
+selected_business_fields <- c(
+  "id", "full_name", "first_name", "last_name", "email",
+  "optin_status", "user_id", "owner_id", "date_created",
+  "date_optin_status_changed", "city", "postal_zip", "region",
+  "lead_source", "tags", "membership_status", "membership_plan",
+  "subscription_start_date", "subscription_end_date", "year_level",
+  "subjects", "job_title_position",
+  "do_you_hold_an_identified_leadership_role",
+  "do_you_hold_an_identified_leadership_role_other", "company_name"
+)
+
+stopifnot(length(selected_business_fields) == 25L)
+stopifnot(all(selected_business_fields %in% names(crm_clean)))
+```
+
+# 8 Create technical validation flags
+
+Flags identify records for later analysis or manual review. They do not remove
+records or make final business classifications.
+
+```{r}
+flag_all_duplicates <- function(x) {
+  !is.na(x) & (duplicated(x) | duplicated(x, fromLast = TRUE))
+}
+
+crm_clean <- crm_clean |>
+  mutate(
+    duplicate_crm_id_candidate = flag_all_duplicates(id),
+    duplicate_email_candidate = flag_all_duplicates(email_key),
+    duplicate_name_candidate = flag_all_duplicates(name_key),
+    email_format_valid = case_when(
+      is.na(email_key) ~ NA,
+      TRUE ~ str_detect(
+        email_key,
+        "^[^[:space:]@]+@[^[:space:]@]+\\.[^[:space:]@]+$"
+      )
+    ),
+    full_name_component_mismatch =
+      !is.na(supplied_full_name_key) &
+      !is.na(constructed_full_name_key) &
+      supplied_full_name_key != constructed_full_name_key,
+    australian_postcode_format_valid = case_when(
+      is.na(postal_zip_clean) ~ NA,
+      TRUE ~ str_detect(postal_zip_clean, "^[0-9]{4}$")
+    ),
+    membership_end_before_start =
+      !is.na(subscription_start_date_clean) &
+      !is.na(subscription_end_date_clean) &
+      subscription_end_date_clean < subscription_start_date_clean,
+    active_membership_with_past_end_date =
+      membership_status_clean == "active" &
+      !is.na(subscription_end_date_clean) &
+      subscription_end_date_clean < extract_date
+  )
+```
+
+# 9 Verify the output contract
+
+```{r}
+required_source_fields <- c(
+  "id", "full_name", "first_name", "last_name", "email",
+  "mobile_phone", "primary_phone", "city", "postal_zip", "region",
+  "tags", "membership_status", "membership_plan",
+  "subscription_start_date", "subscription_end_date", "company_name"
+)
+
+required_derived_fields <- c(
+  "source_record_number", "structure_issue", "email_key", "name_key",
+  "school_name_key", "preferred_phone", "suburb_candidate", "region_clean",
+  "postal_zip_clean", "membership_status_clean", "membership_plan_clean",
+  "membership_tag_active", "membership_tag_on_hold",
+  "membership_tag_expired", "membership_tag_status",
+  "membership_tag_category_count",
+  "multiple_membership_tag_categories",
+  "duplicate_crm_id_candidate", "duplicate_email_candidate",
+  "duplicate_name_candidate", "email_format_valid",
+  "full_name_component_mismatch",
+  "australian_postcode_format_valid"
+)
+
+stopifnot(nrow(crm_clean) == source_record_count)
+stopifnot(all(required_source_fields %in% names(crm_clean)))
+stopifnot(all(required_derived_fields %in% names(crm_clean)))
+stopifnot(!anyDuplicated(crm_clean$source_record_number))
+
+crm_analysis <- crm_clean |>
+  select(
+    source_record_number,
+    structure_issue,
+    all_of(selected_business_fields),
+    all_of(required_derived_fields[!required_derived_fields %in% c(
+      "source_record_number", "structure_issue"
+    )]),
+    ends_with("_clean"),
+    membership_end_before_start,
+    active_membership_with_past_end_date
+  ) |>
+  select(!any_of(c("mobile_phone_clean", "primary_phone_clean")))
+
+stopifnot(nrow(crm_analysis) == source_record_count)
+stopifnot(all(selected_business_fields %in% names(crm_analysis)))
+
+crm_output_validation <- tibble(
+  check = c(
+    "Output records equal source records",
+    "All source fields retained",
+    "Required source fields available",
+    "Required derived fields available",
+    "Analysis dataset contains 25 selected source fields",
+    "Source record numbers unique"
+  ),
+  passed = c(
+    nrow(crm_clean) == source_record_count,
+    all(source_fields_clean_names %in% names(crm_clean)),
+    all(required_source_fields %in% names(crm_clean)),
+    all(required_derived_fields %in% names(crm_clean)),
+    all(selected_business_fields %in% names(crm_analysis)),
+    !anyDuplicated(crm_clean$source_record_number)
+  )
+)
+
+crm_output_validation
+```
+
+The table is based on the source row count, source field list, selected 25-field
+contract and derived-field contract. Every row is a pipeline integrity test. `TRUE` means
+the clean output retained the expected records and fields and preserved unique
+source row identifiers. These checks validate the pipeline structure, not the
+business accuracy of every CRM value.
+
+# 10 Save pipeline outputs
+
+## 10.1 Output locations
+
+```{r}
+output_dir <- here("data", "clean", "CRM")
+restricted_dir <- file.path(output_dir, "restricted")
+
+dir.create(output_dir, recursive = TRUE, showWarnings = FALSE)
+dir.create(restricted_dir, recursive = TRUE, showWarnings = FALSE)
+```
+
+## 10.2 Record-level restricted outputs
+
+```{r}
+crm_review_flags_internal <- crm_clean |>
+  filter(
+    structure_issue |
+      duplicate_crm_id_candidate |
+      duplicate_email_candidate |
+      duplicate_name_candidate |
+      coalesce(!email_format_valid, FALSE) |
+      coalesce(!australian_postcode_format_valid, FALSE) |
+      coalesce(membership_end_before_start, FALSE) |
+      coalesce(active_membership_with_past_end_date, FALSE)
+  )
+
+write_csv(
+  crm_clean,
+  file.path(restricted_dir, "crm_contacts_clean_internal.csv"),
+  na = ""
+)
+
+write_csv(
+  crm_analysis,
+  file.path(restricted_dir, "crm_contacts_analysis_internal.csv"),
+  na = ""
+)
+
+write_csv(
+  crm_review_flags_internal,
+  file.path(restricted_dir, "crm_review_flags_internal.csv"),
+  na = ""
+)
+```
+
+## 10.3 Non-identifiable technical outputs
+
+```{r}
+crm_cleaning_log <- tribble(
+  ~step, ~area, ~rule,
+  1L, "Import", "Import all source variables as character values",
+  2L, "Audit", "Retain source row number and parser issue flag",
+  3L, "Missing values", "Standardise whitespace blanks and selected No placeholders",
+  4L, "Structure", "Quarantine unreliable post-notes values in parser-affected rows",
+  5L, "Matching", "Create reusable email name school and tag keys",
+  6L, "Contact", "Create clean phone suburb candidate region and postcode fields",
+  7L, "Dates", "Parse reusable CRM dates without overwriting source text",
+  8L, "Membership", "Standardise membership status plan and requested tag category",
+  9L, "Selection", "Create analysis data from the 25 agreed business variables",
+  10L, "Validation", "Create technical flags without deleting records",
+  11L, "Output", "Separate restricted records from aggregate technical outputs"
+)
+
+crm_analysis_variable_contract <- tibble(
+  position = seq_along(selected_business_fields),
+  source_field = selected_business_fields
+)
+
+write_csv(
+  crm_import_validation,
+  file.path(output_dir, "crm_import_validation.csv"),
+  na = ""
+)
+
+write_csv(
+  crm_date_parse_validation,
+  file.path(output_dir, "crm_date_parse_validation.csv"),
+  na = ""
+)
+
+write_csv(
+  crm_output_validation,
+  file.path(output_dir, "crm_output_validation.csv"),
+  na = ""
+)
+
+write_csv(
+  crm_cleaning_log,
+  file.path(output_dir, "crm_cleaning_log.csv"),
+  na = ""
+)
+
+write_csv(
+  crm_analysis_variable_contract,
+  file.path(output_dir, "crm_analysis_variable_contract.csv"),
+  na = ""
+)
+```
+
+# 11 Handoff to analysis reports
+
+The reusable record-level input for all later CRM reports is:
+
+```text
+data/clean/CRM/restricted/crm_contacts_analysis_internal.csv
+```
+
+The next report, `02_crm_data_quality.qmd`, will calculate and interpret record
+counts, duplicates, invalid contact details and business-field completeness.
