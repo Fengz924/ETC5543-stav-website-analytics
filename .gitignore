@@ -86,3 +86,6 @@ reports/CRM/*.original.qmd
 
 # macOS metadata remains excluded
 .DS_Store
+
+# Microsoft Office temporary lock files
+~$*
