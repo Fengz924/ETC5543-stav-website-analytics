@@ -1,0 +1,715 @@
+---
+title: "CRM membership analysis"
+subtitle: "Membership status tag reconciliation and review"
+author: "Jordan"
+date: today
+format:
+  html:
+    toc: true
+    toc-depth: 2
+    number-sections: false
+    code-fold: true
+    embed-resources: true
+execute:
+  warning: false
+  message: false
+---
+
+# Purpose
+
+This report compares two CRM representations of membership:
+
+1. The value recorded in `membership_status`.
+2. The Active, On-hold and Expired categories detected in `tags`.
+
+It reports category counts, measures the differences between the two sources and
+creates restricted record-level files for manual review. Active membership is a
+subscription classification and must not be interpreted as active engagement
+with STAV.
+
+# 1 Setup and input contract
+
+```{r}
+library(tidyverse)
+library(lubridate)
+library(here)
+
+options(scipen = 999)
+here::i_am("reports/CRM/04_crm_membership_analysis.qmd")
+
+crm_file <- here(
+  "data", "clean", "CRM", "restricted",
+  "crm_contacts_analysis_internal.csv"
+)
+
+stopifnot(file.exists(crm_file))
+
+crm <- read_csv(
+  crm_file,
+  col_types = cols(.default = col_character()),
+  show_col_types = FALSE,
+  progress = FALSE
+)
+
+required_fields <- c(
+  "source_record_number", "id", "full_name", "email", "company_name",
+  "school_name_key",
+  "tags", "membership_status", "membership_status_clean",
+  "membership_plan", "membership_plan_clean",
+  "subscription_start_date_clean", "subscription_end_date_clean",
+  "membership_tag_active", "membership_tag_on_hold",
+  "membership_tag_expired", "membership_tag_status",
+  "membership_tag_category_count", "multiple_membership_tag_categories",
+  "membership_end_before_start", "active_membership_with_past_end_date"
+)
+
+stopifnot(all(required_fields %in% names(crm)))
+stopifnot(!anyDuplicated(crm$source_record_number))
+
+membership_categories <- c("active", "on-hold", "expired")
+```
+
+# 2 Membership status distribution
+
+## 2.1 All recorded status categories
+
+```{r}
+membership_status_summary <- crm |>
+  mutate(
+    membership_status_display = replace_na(
+      membership_status_clean,
+      "No status recorded"
+    )
+  ) |>
+  count(membership_status_display, name = "contact_records", sort = TRUE) |>
+  mutate(percentage_of_contacts = contact_records / nrow(crm))
+
+membership_status_summary |>
+  mutate(
+    percentage_of_contacts = scales::percent(
+      percentage_of_contacts,
+      accuracy = 0.1
+    )
+  ) |>
+  knitr::kable(
+    col.names = c("Membership status", "Contacts", "Percentage"),
+    align = c("l", "r", "r")
+  )
+```
+
+The table is based on `membership_status_clean`. Each contact contributes to one cleaned
+`membership_status` category or to `No status recorded`. The counts describe
+the CRM field as stored; they do not confirm payment, current eligibility or
+recent engagement.
+
+## 2.2 Status counts used in the three-category comparison
+
+```{r}
+membership_status_three_category <- crm |>
+  filter(membership_status_clean %in% membership_categories) |>
+  count(
+    category = membership_status_clean,
+    name = "status_records"
+  ) |>
+  complete(
+    category = membership_categories,
+    fill = list(status_records = 0L)
+  ) |>
+  mutate(category = factor(category, levels = membership_categories)) |>
+  arrange(category)
+
+knitr::kable(
+  membership_status_three_category,
+  col.names = c("Category", "Records from membership status"),
+  align = c("l", "r")
+)
+```
+
+The table is based on `membership_status_clean` after filtering to Active,
+On-hold and Expired. It keeps only these three categories so
+they can be compared directly with the three requested tag categories.
+Cancelled, Pending, Paused and Pending-cancel remain in the full status table
+but are not forced into one of these categories.
+
+# 3 Membership tag distribution
+
+## 3.1 Priority classification requested for tags
+
+Report 01 applies the agreed order:
+
+```r
+case_when(
+  str_detect(tags, "\\[MEMBERSHIP\\] ACTIVE") ~ "active",
+  str_detect(tags, "\\[MEMBERSHIP\\] ON-HOLD") ~ "on-hold",
+  str_detect(tags, "\\[MEMBERSHIP\\] EXPIRED") ~ "expired"
+)
+```
+
+If a contact contains more than one of these tags, Active takes priority over
+On-hold, and On-hold takes priority over Expired.
+
+```{r}
+membership_tag_classification_summary <- crm |>
+  mutate(
+    membership_tag_display = replace_na(
+      membership_tag_status,
+      "No selected membership tag"
+    )
+  ) |>
+  count(membership_tag_display, name = "contact_records", sort = TRUE) |>
+  mutate(percentage_of_contacts = contact_records / nrow(crm))
+
+membership_tag_classification_summary |>
+  mutate(
+    percentage_of_contacts = scales::percent(
+      percentage_of_contacts,
+      accuracy = 0.1
+    )
+  ) |>
+  knitr::kable(
+    col.names = c("Membership tag category", "Contacts", "Percentage"),
+    align = c("l", "r", "r")
+  )
+```
+
+The table is based on `membership_tag_status`, which is derived from `tags`.
+Each contact receives at most one tag category using
+the agreed priority order. When several selected tags occur together, Active
+overrides On-hold and Expired, and On-hold overrides Expired. The table is
+therefore mutually exclusive but can hide lower-priority tag occurrences.
+
+## 3.2 Independent tag occurrence counts
+
+Independent counts do not apply category priority. A contact carrying more than
+one selected membership tag contributes to each matching tag count.
+
+```{r}
+membership_tag_occurrence_summary <- tibble(
+  category = membership_categories,
+  tag_records = c(
+    sum(crm$membership_tag_active == "TRUE", na.rm = TRUE),
+    sum(crm$membership_tag_on_hold == "TRUE", na.rm = TRUE),
+    sum(crm$membership_tag_expired == "TRUE", na.rm = TRUE)
+  )
+)
+
+knitr::kable(
+  membership_tag_occurrence_summary,
+  col.names = c("Tag category", "Contacts carrying tag"),
+  align = c("l", "r")
+)
+```
+
+The table is based on `membership_tag_active`, `membership_tag_on_hold` and
+`membership_tag_expired`. Each selected tag is counted independently. A
+contact carrying two or three selected membership tags contributes to every
+matching row, so these values can exceed the mutually exclusive classification
+counts above.
+
+## 3.3 Multiple selected membership tags
+
+```{r}
+multiple_membership_tag_summary <- crm |>
+  filter(multiple_membership_tag_categories == "TRUE") |>
+  count(
+    membership_tag_active,
+    membership_tag_on_hold,
+    membership_tag_expired,
+    name = "contact_records",
+    sort = TRUE
+  )
+
+tibble(
+  metric = "Contacts carrying more than one selected membership tag",
+  contact_records = sum(
+    crm$multiple_membership_tag_categories == "TRUE",
+    na.rm = TRUE
+  )
+) |>
+  knitr::kable(align = c("l", "r"))
+
+knitr::kable(
+  multiple_membership_tag_summary,
+  col.names = c("Active tag", "On-hold tag", "Expired tag", "Contacts"),
+  align = c("c", "c", "c", "r")
+)
+```
+
+The tables are based on `membership_tag_category_count` and the three tag flags.
+The first table gives the unique number of
+contacts carrying more than one selected membership tag. The second shows which
+tag combinations occur. Multiple tags may reflect history or migration and
+require review before the priority category is treated as authoritative.
+
+# 4 Compare membership status with tag classification
+
+## 4.1 Category-count comparison
+
+```{r}
+membership_tag_three_category <- crm |>
+  filter(membership_tag_status %in% membership_categories) |>
+  count(
+    category = membership_tag_status,
+    name = "tag_classification_records"
+  ) |>
+  complete(
+    category = membership_categories,
+    fill = list(tag_classification_records = 0L)
+  ) |>
+  mutate(category = factor(category, levels = membership_categories)) |>
+  arrange(category)
+
+membership_count_comparison <- membership_status_three_category |>
+  left_join(membership_tag_three_category, by = "category") |>
+  mutate(
+    difference_tag_minus_status =
+      tag_classification_records - status_records,
+    absolute_difference = abs(difference_tag_minus_status)
+  )
+
+knitr::kable(
+  membership_count_comparison,
+  col.names = c(
+    "Category", "Membership status", "Tag classification",
+    "Tag minus status", "Absolute difference"
+  ),
+  align = c("l", "r", "r", "r", "r")
+)
+```
+
+The table is based on `membership_status_clean` and `membership_tag_status`.
+For each of the three categories, `Tag minus status` compares category totals; a
+negative result means fewer contacts in the priority tag classification than in
+the status field. It does not identify the affected contacts or distinguish
+missing tags from conflicting categories.
+
+The difference in category totals does not identify which records disagree.
+The record-level comparison below separates missing classifications from true
+category conflicts.
+
+## 4.2 Record-level comparison classes
+
+```{r}
+crm_membership_comparison <- crm |>
+  mutate(
+    status_in_comparison = membership_status_clean %in% membership_categories,
+    tag_in_comparison = membership_tag_status %in% membership_categories,
+    membership_comparison_class = case_when(
+      status_in_comparison & tag_in_comparison &
+        membership_status_clean == membership_tag_status ~
+        "Status and tag agree",
+      status_in_comparison & tag_in_comparison &
+        membership_status_clean != membership_tag_status ~
+        "Status and tag disagree",
+      status_in_comparison & !tag_in_comparison ~
+        "Selected status but no selected tag",
+      !status_in_comparison & tag_in_comparison ~
+        "Selected tag but no comparable status",
+      TRUE ~ "Neither source has a comparable category"
+    )
+  )
+
+membership_comparison_summary <- crm_membership_comparison |>
+  count(membership_comparison_class, name = "contact_records", sort = TRUE) |>
+  mutate(percentage_of_contacts = contact_records / nrow(crm_membership_comparison))
+
+membership_comparison_summary |>
+  mutate(
+    percentage_of_contacts = scales::percent(
+      percentage_of_contacts,
+      accuracy = 0.1
+    )
+  ) |>
+  knitr::kable(
+    col.names = c("Comparison result", "Contacts", "Percentage"),
+    align = c("l", "r", "r")
+  )
+```
+
+The table is based on a row-by-row comparison of `membership_status_clean` and
+`membership_tag_status`. Agreement requires the cleaned status and priority
+tag classification to be the same selected category. Missing counterparts and
+true category disagreements are shown separately. Categories outside Active,
+On-hold and Expired are treated as not directly comparable.
+
+The calculation starts with one contact at a time and asks two questions:
+
+1. Is `membership_status_clean` Active, On-hold or Expired?
+2. Is `membership_tag_status` Active, On-hold or Expired?
+
+The contact is then assigned to exactly one result:
+
+- If both answers are yes and the values are identical, the result is `Status
+  and tag agree`.
+- If both answers are yes but the values differ, the result is `Status and tag
+  disagree`.
+- If only the status is one of the three categories, the result is `Selected
+  status but no selected tag`.
+- If only the tag is one of the three categories, the result is `Selected tag
+  but no comparable status`.
+- If neither field contains one of the three comparable categories, the result
+  is `Neither source has a comparable category`.
+
+For example, Active status plus Active tag is an agreement; Active status plus
+Expired tag is a disagreement; Active status with no selected membership tag
+is a missing-tag case. A Cancelled status with no selected membership tag is
+placed in the final class because Cancelled has no equivalent among the three
+selected tag categories.
+
+## 4.3 Status by tag cross-table
+
+```{r}
+membership_status_tag_crosstab <- crm_membership_comparison |>
+  mutate(
+    status_display = replace_na(
+      membership_status_clean,
+      "No status recorded"
+    ),
+    tag_display = replace_na(
+      membership_tag_status,
+      "No selected membership tag"
+    )
+  ) |>
+  count(status_display, tag_display, name = "contact_records") |>
+  arrange(desc(contact_records), status_display, tag_display)
+
+membership_status_tag_matrix <- membership_status_tag_crosstab |>
+  pivot_wider(
+    names_from = tag_display,
+    values_from = contact_records,
+    values_fill = 0
+  )
+
+knitr::kable(membership_status_tag_matrix, align = "r")
+```
+
+The table is based on a cross-tabulation of `membership_status_clean` and
+`membership_tag_status`. Rows are cleaned membership statuses and columns are
+priority tag classifications. Cells on matching Active, On-hold and Expired
+positions represent agreement; off-diagonal cells show differences. Missing
+categories expose records represented by only one source.
+
+# 5 Membership plan, organisation and date checks
+
+## 5.1 Membership group
+
+```{r}
+school_membership_plans <- c(
+  "Secondary School - Group Membership",
+  "P - 12 School - Group Membership",
+  "Primary School - Group Membership"
+)
+
+organisation_membership_plans <- "Organisation - Group Membership"
+
+crm_membership_group <- crm |>
+  mutate(
+    membership_group = case_when(
+      membership_plan_clean %in% organisation_membership_plans ~
+        "Organisation",
+      membership_plan_clean %in% school_membership_plans ~
+        "School membership",
+      !is.na(membership_plan_clean) ~ "Individual",
+      TRUE ~ "Blank"
+    ),
+    membership_group = factor(
+      membership_group,
+      levels = c(
+        "Organisation", "School membership", "Individual", "Blank"
+      )
+    )
+  )
+
+membership_group_summary <- crm_membership_group |>
+  count(membership_group, name = "contact_records", .drop = FALSE) |>
+  mutate(percentage_of_contacts = contact_records / nrow(crm_membership_group))
+
+membership_group_summary |>
+  mutate(
+    percentage_of_contacts = scales::percent(
+      percentage_of_contacts,
+      accuracy = 0.1
+    )
+  ) |>
+  knitr::kable(
+    col.names = c("Membership group", "Contacts", "Percentage"),
+    align = c("l", "r", "r")
+  )
+```
+
+The table is based only on `membership_plan_clean`, so each contact is counted
+once. `Organisation` means the plan is Organisation - Group Membership.
+`School membership` combines Primary School, Secondary School and P-12 School
+Group Membership plans. `Individual` includes every other non-blank plan, such
+as teacher, student teacher, academic, technician, life and retired plans.
+`Blank` means no membership plan is recorded. Membership status is not used in
+this classification, so membership type and membership activity are not mixed.
+
+```{r}
+membership_plan_distinct_summary <- crm |>
+  mutate(
+    membership_plan_display = if_else(
+      is.na(membership_plan),
+      "Blank",
+      membership_plan
+    )
+  ) |>
+  count(membership_plan_display, name = "contact_records", sort = TRUE) |>
+  mutate(percentage_of_contacts = contact_records / nrow(crm))
+
+membership_plan_distinct_summary |>
+  mutate(
+    percentage_of_contacts = scales::percent(
+      percentage_of_contacts,
+      accuracy = 0.1
+    )
+  ) |>
+  knitr::kable(
+    col.names = c("Distinct membership plan", "Contacts", "Percentage"),
+    align = c("l", "r", "r")
+  )
+```
+
+This second table is based directly on the original `membership_plan` field,
+not only `membership_plan_clean`. Each distinct supplied plan value is shown
+separately, and missing values are displayed as Blank. It provides the detailed
+plan counts underlying the four broader membership groups above.
+
+## 5.2 Organisation-level membership table
+
+```{r}
+organisation_membership <- crm_membership_group |>
+  filter(!is.na(school_name_key)) |>
+  group_by(school_name_key) |>
+  summarise(
+    organization_name = {
+      name_counts <- tibble(name = company_name) |>
+        filter(!is.na(name)) |>
+        count(name, sort = TRUE)
+      if (nrow(name_counts) == 0) school_name_key else name_counts$name[[1]]
+    },
+    organization_status = if_else(
+      any(membership_status_clean == "active", na.rm = TRUE),
+      "Active",
+      "Not active"
+    ),
+    organization_plan = {
+      group_plans <- sort(unique(membership_plan_clean[
+        membership_plan_clean %in% c(
+          organisation_membership_plans,
+          school_membership_plans
+        )
+      ]))
+      if (length(group_plans) == 0) {
+        "No group membership plan"
+      } else {
+        paste(group_plans, collapse = "; ")
+      }
+    },
+    organization_type = case_when(
+      any(membership_plan_clean %in% school_membership_plans) ~ "School",
+      any(membership_plan_clean %in% organisation_membership_plans) ~
+        "Organisation",
+      TRUE ~ "Unknown"
+    ),
+    .groups = "drop"
+  ) |>
+  select(
+    `Organization name` = organization_name,
+    `Organization status` = organization_status,
+    `Organization plan` = organization_plan,
+    `Organization type` = organization_type
+  ) |>
+  arrange(`Organization name`)
+
+organisation_membership_total <- tibble(
+  metric = "Total organisations",
+  organisations = nrow(organisation_membership)
+)
+
+organisation_status_summary <- organisation_membership |>
+  count(`Organization status`, name = "organisations")
+
+organisation_type_summary <- organisation_membership |>
+  count(`Organization type`, name = "organisations")
+
+organisation_membership_total |>
+  knitr::kable(
+    col.names = c("Metric", "Organisations"),
+    align = c("l", "r")
+  )
+
+organisation_status_summary |>
+  knitr::kable(
+    col.names = c("Organization status", "Organisations"),
+    align = c("l", "r")
+  )
+
+organisation_type_summary |>
+  knitr::kable(
+    col.names = c("Organization type", "Organisations"),
+    align = c("l", "r")
+  )
+
+organisation_membership |>
+  slice_head(n = 10) |>
+  knitr::kable(align = c("l", "l", "l", "l"))
+```
+
+The summary tables count all organisations, first as a total and then by
+`Organization status` and `Organization type`. These two breakdowns describe
+different attributes and should not be added together. The detail table displays
+the first 10 organisations in alphabetical order as a preview; the complete
+organisation-level dataset is saved as a CSV file. The complete table has one
+row per non-blank `school_name_key`. `Organization name` is
+the most frequently occurring non-blank `company_name` for that standardised
+key. `Organization status` is Active when at least one associated contact has
+`membership_status_clean` equal to Active; otherwise it is Not active,
+including organisations with no recorded membership. `Organization plan`
+lists the distinct school or organisation group plans recorded among associated
+contacts; if none is found, it is shown as No group membership plan.
+`Organization type` is School when any school group plan is found,
+Organisation when an Organisation - Group Membership plan is found and no
+school group plan is present, and Unknown when neither plan type is available.
+
+## 5.3 Membership date and plan coverage
+
+These checks support membership reconciliation. They do not establish payment
+status or relationship activity.
+
+```{r}
+membership_supporting_checks <- tibble(
+  check = c(
+    "Membership status recorded",
+    "Membership plan recorded",
+    "Subscription start date recorded",
+    "Subscription end date recorded",
+    "Membership end date before start date",
+    "Active status with past end date"
+  ),
+  contact_records = c(
+    sum(!is.na(crm$membership_status_clean)),
+    sum(!is.na(crm$membership_plan_clean)),
+    sum(!is.na(crm$subscription_start_date_clean)),
+    sum(!is.na(crm$subscription_end_date_clean)),
+    sum(crm$membership_end_before_start == "TRUE", na.rm = TRUE),
+    sum(crm$active_membership_with_past_end_date == "TRUE", na.rm = TRUE)
+  )
+)
+
+knitr::kable(membership_supporting_checks, align = c("l", "r"))
+```
+
+The table is based on `membership_status_clean`, `membership_plan_clean`, the
+clean subscription dates and the two date-validation flags. The first four rows measure whether supporting
+membership values are populated. The final two rows apply date-consistency
+rules. An Active status with a past end date is a review flag, not automatic
+proof that the membership is inactive.
+
+# 6 Findings and interpretation
+
+- `membership_status` is the primary status field, while tags provide a second
+  classification that may lag or reflect migration history.
+- Matching totals do not prove record-level agreement; the cross-table and
+  review file identify the actual differences.
+- Contacts with multiple selected membership tags require review before the
+  priority classification is treated as definitive.
+- Cancelled, pending, paused and pending-cancel statuses have no direct category
+  in the requested three-tag comparison.
+- Active membership means a membership record is labelled active. It does not
+  measure whether a person has recently engaged with STAV.
+
+# 7 Save outputs
+
+```{r}
+output_dir <- here("data", "analysis", "CRM", "04_membership")
+restricted_dir <- file.path(output_dir, "restricted")
+
+dir.create(output_dir, recursive = TRUE, showWarnings = FALSE)
+dir.create(restricted_dir, recursive = TRUE, showWarnings = FALSE)
+
+membership_difference_review_internal <- crm_membership_comparison |>
+  filter(membership_comparison_class != "Status and tag agree") |>
+  filter(
+    membership_comparison_class !=
+      "Neither source has a comparable category" |
+      !is.na(membership_status_clean) |
+      !is.na(membership_plan_clean) |
+      multiple_membership_tag_categories == "TRUE"
+  ) |>
+  select(
+    source_record_number, id, full_name, email, company_name,
+    membership_status, membership_status_clean,
+    membership_plan, membership_plan_clean, tags,
+    membership_tag_active, membership_tag_on_hold,
+    membership_tag_expired, membership_tag_status,
+    multiple_membership_tag_categories,
+    membership_comparison_class,
+    subscription_start_date_clean, subscription_end_date_clean,
+    active_membership_with_past_end_date
+  ) |>
+  arrange(membership_comparison_class, membership_status_clean, full_name)
+
+multiple_membership_tags_review_internal <- crm_membership_comparison |>
+  filter(multiple_membership_tag_categories == "TRUE") |>
+  select(
+    source_record_number, id, full_name, email, company_name,
+    membership_status, membership_status_clean, tags,
+    membership_tag_active, membership_tag_on_hold,
+    membership_tag_expired, membership_tag_status,
+    membership_comparison_class
+  ) |>
+  arrange(full_name)
+
+aggregate_outputs <- list(
+  crm_membership_status_summary = membership_status_summary,
+  crm_membership_status_three_category = membership_status_three_category,
+  crm_membership_tag_classification_summary =
+    membership_tag_classification_summary,
+  crm_membership_tag_occurrence_summary = membership_tag_occurrence_summary,
+  crm_multiple_membership_tag_summary = multiple_membership_tag_summary,
+  crm_membership_count_comparison = membership_count_comparison,
+  crm_membership_comparison_summary = membership_comparison_summary,
+  crm_membership_status_tag_crosstab = membership_status_tag_crosstab,
+  crm_membership_status_tag_matrix = membership_status_tag_matrix,
+  crm_membership_supporting_checks = membership_supporting_checks,
+  crm_membership_group_summary = membership_group_summary,
+  crm_membership_plan_distinct_summary = membership_plan_distinct_summary,
+  crm_organisation_membership_total = organisation_membership_total,
+  crm_organisation_status_summary = organisation_status_summary,
+  crm_organisation_type_summary = organisation_type_summary,
+  crm_organisation_membership = organisation_membership
+)
+
+iwalk(
+  aggregate_outputs,
+  ~ write_csv(.x, file.path(output_dir, paste0(.y, ".csv")), na = "")
+)
+
+write_csv(
+  membership_difference_review_internal,
+  file.path(restricted_dir, "crm_membership_difference_review_internal.csv"),
+  na = ""
+)
+
+write_csv(
+  multiple_membership_tags_review_internal,
+  file.path(restricted_dir, "crm_multiple_membership_tags_review_internal.csv"),
+  na = ""
+)
+
+write_csv(
+  crm_membership_group |>
+    mutate(membership_group = as.character(membership_group)) |>
+    select(source_record_number, id, membership_plan_clean, membership_group),
+  file.path(restricted_dir, "crm_contact_membership_group_internal.csv"),
+  na = ""
+)
+```
+
+# 8 Handoff
+
+This report completes the requested comparison between `membership_status` and
+the three selected membership tag categories. Report 05 will address active and
+dormant relationships only after the engagement definition and required
+activity data are confirmed.
