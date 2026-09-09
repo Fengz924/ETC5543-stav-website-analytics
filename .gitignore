@@ -83,3 +83,6 @@ reports/CRM/*.original.qmd
 # Allow fictional example data
 !data/example/
 !data/example/**
+
+# macOS metadata remains excluded
+.DS_Store
