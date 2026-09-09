@@ -81,3 +81,14 @@ Current work includes:
 ├── figures/    # Generated visualisations
 └── reports/    # Analysis reports
 ```
+
+The original STAV datasets are not included because they may contain
+confidential, identifying or commercially sensitive information.
+
+Analysis code retains the relevant variable names to document the complete
+methodology. Where a data-structure example is required, the repository uses
+small synthetic datasets containing fictional values rather than extracts of
+real records.
+
+Cleaned record-level datasets, manual-review files and generated analysis
+outputs remain excluded from version control.
