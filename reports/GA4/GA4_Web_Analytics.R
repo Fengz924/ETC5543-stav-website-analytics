@@ -386,3 +386,87 @@ ggplot(
   theme_minimal()
 
 
+# ============================================================
+# 6. MONTH-TO-MONTH CHANNEL CHANGE
+# ============================================================
+
+
+# ------------------------------------------------------------
+# 6.1 Calculate month-to-month changes
+# ------------------------------------------------------------
+
+monthly_change <- monthly_channel %>%
+  select(
+    date,
+    channel =
+      session_primary_channel_group_default_channel_group,
+    sessions
+  ) %>%
+  arrange(channel, date) %>%
+  group_by(channel) %>%
+  mutate(
+    previous_sessions = lag(sessions),
+    change = sessions - previous_sessions,
+    pct_change =
+      (sessions / previous_sessions - 1) * 100
+  ) %>%
+  ungroup()
+
+monthly_change %>%
+  arrange(date, desc(change)) %>%
+  print(n = 48)
+
+
+# ------------------------------------------------------------
+# 6.2 Examine key traffic transitions
+# ------------------------------------------------------------
+
+key_month_changes <- monthly_change %>%
+  filter(
+    date %in% as.Date(c(
+      "2025-10-01",
+      "2026-01-01",
+      "2026-02-01",
+      "2026-05-01",
+      "2026-06-01"
+    ))
+  ) %>%
+  select(
+    date,
+    channel,
+    sessions,
+    previous_sessions,
+    change,
+    pct_change
+  ) %>%
+  arrange(date, desc(change))
+
+key_month_changes
+
+
+# Key observations:
+#
+# September -> October 2025:
+# Direct increased by 2,522 sessions (+202%).
+# Organic Search increased by 2,519 sessions (+121%).
+# Referral increased by 155 sessions (+122%).
+# The October recovery therefore occurred across multiple channels.
+#
+# January -> February 2026:
+# Organic Search increased by 2,182 sessions (+123%).
+# Direct increased by 1,954 sessions (+58.9%).
+# Referral and Organic Social also increased.
+#
+# May -> June 2026:
+# Direct increased by 816 sessions (+16.2%),
+# while Organic Search decreased by 1,648 (-34.1%)
+# and Referral decreased by 324 (-53.2%).
+#
+# Therefore, the overall decline in June masks different movements
+# across acquisition channels.
+#
+# These are descriptive findings only. Additional source/medium,
+# landing-page, campaign, and STAV activity data are required before
+# attributing the changes to specific causes.
+
+
