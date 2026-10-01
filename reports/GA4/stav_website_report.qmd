@@ -980,3 +980,220 @@ knitr::kable(
 ```
 
 
+# Audience and Devices
+
+## New and Returning Users
+```{r}
+#| label: fig-new-returning-users
+#| fig-width: 8
+#| fig-height: 4.5
+#| fig-align: center
+
+user_type <- tibble(
+  user_type = factor(
+    c("New users", "Returning users"),
+    levels = c("New users", "Returning users")
+  ),
+  users = c(54000, 9300)
+)
+
+
+ggplot(user_type, aes(x = reorder(user_type, users), y = users)) +
+  geom_col(width = 0.6) +
+  geom_text(
+    aes(label = scales::comma(users)),
+    vjust = -0.5,
+    size = 5
+  ) +
+  scale_y_continuous(
+    labels = scales::label_comma(),
+    expand = expansion(mult = c(0, 0.12))
+  ) +
+  labs(
+    x = NULL,
+    y = "Users",
+    title = "New and Returning Users"
+  ) +
+  theme_minimal(base_size = 14) +
+  theme(
+    panel.grid.major.x = element_blank(),
+    panel.grid.minor = element_blank()
+  )
+```
+During the reporting period from **1 July 2025 to 30 June 2026**, GA4 recorded approximately **54,000 new users** and **9,300 returning users**. The figures indicate that the website reached a large number of new users during the year, alongside a smaller but notable returning audience.
+
+New and returning users are not mutually exclusive in GA4. A user may first be counted as a new user and later also be counted as a returning user if they revisit the website. Therefore, these figures should not be added together to estimate total users.
+
+The higher number of new users may partly reflect visitors discovering STAV through search engines when looking for specific events, resources or Science Talent Search information. Returning users may include visitors who revisit the website for ongoing activities such as accessing resources, checking events or using account functions. These are possible explanations based on the observed traffic and content patterns， GA4 does not directly identify why individual users return to the website.
+
+
+## Device Category
+
+Device data provides an indication of how visitors access the STAV website. The analysis compares desktop, mobile and tablet usage, while recognising that the same person may use the website on more than one device.
+
+```{r}
+#| label: fig-device-category
+#| fig-cap: "Website Active Users by Device Category"
+#| fig-width: 9
+#| fig-height: 5.5
+
+device_summary <- device %>%
+  mutate(
+    active_user_share = active_users / sum(active_users)
+  )
+
+ggplot(
+  device_summary,
+  aes(
+    x = reorder(device_category, active_users),
+    y = active_users
+  )
+) +
+  geom_col() +
+
+  # Active User count inside longer bars
+  geom_text(
+    data = device_summary %>% filter(active_users >= 5000),
+    aes(label = scales::comma(active_users)),
+    hjust = 1.15,
+    size = 4
+  ) +
+
+  # Active User count outside shorter bars
+  geom_text(
+    data = device_summary %>% filter(active_users < 5000),
+    aes(label = scales::comma(active_users)),
+    hjust = -0.2,
+    size = 4
+  ) +
+
+  # User share and engagement rate
+  geom_text(
+    aes(
+      y = 52000,
+      label = paste0(
+        scales::percent(active_user_share, accuracy = 0.1),
+        " of users | ",
+        scales::percent(engagement_rate, accuracy = 0.1),
+        " engagement"
+      )
+    ),
+    hjust = 0,
+    size = 3.6
+  ) +
+
+  coord_flip() +
+
+  scale_y_continuous(
+    labels = scales::comma,
+    limits = c(0, 80000),
+    expand = expansion(mult = c(0, 0))
+  ) +
+
+  labs(
+    title = "Website Active Users by Device Category",
+    subtitle = "User share and engagement rate by device",
+    x = NULL,
+    y = "Device-level Active Users"
+  ) +
+
+  theme_minimal()
+
+```
+
+**How to read this chart:**\
+Active Users represent users who actively used the website. The percentages shown here represent the share of device-level Active Users. A person who uses STAV's website on more than one device may appear in more than one device category.
+
+**What this means for STAV:** Website usage was strongly desktop-oriented, with desktop accounting for approximately 83.4% of device-level Active Users. Mobile represented 15.9%, while tablet usage was relatively small.
+
+Although mobile represented a much smaller share of users, mobile traffic recorded an engagement rate of 50.4%, compared with 42.0% for desktop. This indicates that mobile remains an important part of website usage despite the website's strong desktop orientation.
+
+## Geographic Distribution
+
+Geographic data provides an indication of where website activity was recorded. However, user counts alone should not be interpreted as evidence of a meaningful audience in a particular country. Engagement measures are also considered to provide additional context.
+
+```{r}
+#| label: fig-country
+#| fig-cap: "Top countries by Active Users"
+#| fig-width: 9
+#| fig-height: 5.5
+
+country_summary <- country %>%
+  mutate(
+    active_user_share = active_users / sum(active_users)
+  ) %>%
+  slice_max(
+    order_by = active_users,
+    n = 5,
+    with_ties = FALSE
+  )
+
+ggplot(
+  country_summary,
+  aes(
+    x = reorder(country, active_users),
+    y = active_users
+  )
+) +
+  geom_col() +
+
+  # User number inside longer bars
+  geom_text(
+    data = country_summary %>% filter(active_users >= 5000),
+    aes(label = scales::comma(active_users)),
+    hjust = 1.15,
+    size = 4
+  ) +
+
+  # User number outside shorter bars
+  geom_text(
+    data = country_summary %>% filter(active_users < 5000),
+    aes(label = scales::comma(active_users)),
+    hjust = -0.2,
+    size = 4
+  ) +
+
+  # User share + engagement
+  geom_text(
+    aes(
+      y = 42000,
+      label = paste0(
+        scales::percent(active_user_share, accuracy = 0.1),
+        " of users | ",
+        scales::percent(engagement_rate, accuracy = 0.1),
+        " engagement"
+      )
+    ),
+    hjust = 0,
+    size = 3.5
+  ) +
+
+  coord_flip() +
+
+  scale_y_continuous(
+    labels = scales::comma,
+    limits = c(0, 70000),
+    expand = expansion(mult = c(0, 0))
+  ) +
+
+  labs(
+    title = "Top Countries by Active Users",
+    subtitle = "User share and engagement rate by country",
+    x = NULL,
+    y = "Country-level Active Users"
+  ) +
+
+  theme_minimal()
+```
+
+“Engagement rate is basically the percentage of sessions that GA4 considers meaningfully engaged. A session is considered engaged if it lasts more than 10 seconds, has a key event, or has at least two page or screen views.”
+
+**How to read this chart:**\
+The chart shows the countries with the highest country-level Active User counts. The percentages represent each country's share of country-level Active Users, while the engagement rate provides additional context about how frequently sessions from each country were classified by GA4 as engaged.
+
+**What this means for STAV:** Australia was the dominant location for meaningful website activity, representing approximately 64.9% of country-level Active Users and generating 85.5% of recorded website events.
+
+China and Singapore each represented approximately 11% of country-level Active Users, but their engagement rates were substantially lower than Australia's. These high user counts should therefore not automatically be interpreted as comparably engaged international audiences.
+
+Vietnam recorded a high engagement rate, but its much smaller user volume means this result should be interpreted cautiously.
+
