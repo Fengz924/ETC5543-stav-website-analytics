@@ -88,3 +88,53 @@ ggplot(
   theme_minimal()
 
 
+# ============================================================
+# 2. TRAFFIC ACQUISITION — MONTHLY DATA
+# ============================================================
+
+
+# ------------------------------------------------------------
+# 2.1 Import and clean monthly channel data
+# ------------------------------------------------------------
+
+monthly <- read_csv(
+  "data/raw/GA4/traffic_channel_monthly_20250701_20260630.csv",
+  skip = 9,
+  show_col_types = FALSE
+) %>%
+  clean_names()
+
+glimpse(monthly)
+
+
+# ------------------------------------------------------------
+# 2.2 Create calendar dates
+# ------------------------------------------------------------
+
+# The reporting period covers July 2025 to June 2026.
+# GA4 exported Month as month number only.
+#
+# Therefore:
+# 07–12 = 2025
+# 01–06 = 2026
+
+monthly <- monthly %>%
+  mutate(
+    month_num = as.integer(month),
+    year = if_else(month_num >= 7, 2025L, 2026L),
+    date = ymd(sprintf("%d-%02d-01", year, month_num))
+  )
+
+# Check date mapping
+monthly %>%
+  select(
+    session_primary_channel_group_default_channel_group,
+    month,
+    year,
+    date,
+    sessions
+  ) %>%
+  arrange(date) %>%
+  print(n = 20)
+
+
