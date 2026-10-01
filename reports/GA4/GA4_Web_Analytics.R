@@ -1702,3 +1702,111 @@ ggplot(
 
 #Device usage was strongly desktop-oriented. Desktop accounted for 83.4% of device-level Active Users, compared with 15.9% for mobile and less than 1% for tablet. However, mobile users recorded a higher engagement rate (50.4%) than desktop users (42.0%), as well as more engaged sessions per active user (0.80 compared with 0.70). This suggests that the smaller mobile audience was still actively engaging with the website. Tablet results should be interpreted cautiously because of the much smaller audience size.
 
+# ============================================================
+# 11. COUNTRY ANALYSIS
+# ============================================================
+
+
+# ------------------------------------------------------------
+# 11.1 Import and inspect country data
+# ------------------------------------------------------------
+
+country <- read_csv(
+  "data/raw/GA4/country_20250701_20260630.csv",
+  skip = 9,
+  show_col_types = FALSE
+) %>%
+  clean_names()
+
+glimpse(country)
+
+names(country)
+
+nrow(country)
+
+country %>%
+  arrange(desc(active_users)) %>%
+  print(n = 20)
+
+# ------------------------------------------------------------
+# 11.2 Country audience summary
+# ------------------------------------------------------------
+
+country_summary <- country %>%
+  mutate(
+    active_user_share =
+      active_users / sum(active_users) * 100,
+    event_share =
+      event_count / sum(event_count) * 100
+  ) %>%
+  arrange(desc(active_users))
+
+country_summary %>%
+  select(
+    country,
+    active_users,
+    active_user_share,
+    engaged_sessions,
+    engagement_rate,
+    average_engagement_time_per_active_user,
+    event_count,
+    event_share
+  ) %>%
+  print(n = 15)
+
+# ------------------------------------------------------------
+# 11.3 Australia vs other countries
+# ------------------------------------------------------------
+
+country_group_summary <- country %>%
+  mutate(
+    country_group =
+      if_else(country == "Australia",
+              "Australia",
+              "Outside Australia")
+  ) %>%
+  group_by(country_group) %>%
+  summarise(
+    active_users = sum(active_users),
+    engaged_sessions = sum(engaged_sessions),
+    event_count = sum(event_count),
+    .groups = "drop"
+  )
+
+country_group_summary
+
+# Finding:
+# Website activity was strongly concentrated in Australia.
+# Australia represented 64.9% of country-level Active Users
+# but generated 85.5% of recorded events.
+#
+# China, Singapore and the United States recorded relatively
+# high Active User counts but substantially weaker engagement
+# signals, so these figures should be interpreted cautiously.
+
+# ------------------------------------------------------------
+# 11.4 Visualise top countries by Active Users
+# ------------------------------------------------------------
+
+country_summary %>%
+  filter(country != "(not set)") %>%
+  slice_max(active_users, n = 10) %>%
+  ggplot(
+    aes(
+      x = reorder(country, active_users),
+      y = active_users
+    )
+  ) +
+  geom_col() +
+  coord_flip() +
+  scale_y_continuous(labels = scales::comma) +
+  labs(
+    title = "Top Countries by Active Users",
+    subtitle = "STAV, 1 July 2025 – 30 June 2026",
+    x = NULL,
+    y = "Active Users"
+  ) +
+  theme_minimal()
+
+#Australia was the largest source of website users and accounted for 85.5% of recorded events. Although China, Singapore and the United States also recorded relatively high Active User counts, their substantially lower engagement rates indicate that these figures should be interpreted cautiously
+
