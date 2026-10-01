@@ -1042,3 +1042,572 @@ source_concentration %>%
     cumulative_share
   )
 
+# ============================================================
+# 9. PAGES & SCREENS ANALYSIS
+# ============================================================
+
+
+# ------------------------------------------------------------
+# 9.1 Import and inspect data
+# ------------------------------------------------------------
+
+pages <- read_csv(
+  "data/raw/GA4/pages_screens_page_path_20250701_20260630.csv",
+  skip = 9,
+  show_col_types = FALSE
+) %>%
+  clean_names()
+
+glimpse(pages)
+
+names(pages)
+
+
+# ------------------------------------------------------------
+# 9.2 Basic data validation
+# ------------------------------------------------------------
+
+nrow(pages)
+
+pages %>%
+  summarise(
+    total_views = sum(views),
+    row_sum_active_users = sum(active_users),
+    total_events = sum(event_count)
+  )
+
+# Check missing page paths
+pages %>%
+  summarise(
+    missing_page_path =
+      sum(is.na(page_path_and_screen_class))
+  )
+
+# Check duplicate page paths
+pages %>%
+  count(page_path_and_screen_class) %>%
+  filter(n > 1)
+
+
+# ------------------------------------------------------------
+# 9.3 Most viewed pages
+# ------------------------------------------------------------
+
+top_pages <- pages %>%
+  arrange(desc(views)) %>%
+  select(
+    page_path_and_screen_class,
+    views,
+    active_users,
+    views_per_active_user,
+    average_engagement_time_per_active_user,
+    event_count
+  )
+
+top_pages %>%
+  print(n = 20)
+
+
+# ------------------------------------------------------------
+# 9.4 Page view concentration
+# ------------------------------------------------------------
+
+page_concentration <- pages %>%
+  arrange(desc(views)) %>%
+  mutate(
+    rank = row_number(),
+    cumulative_views = cumsum(views),
+    view_share = views / sum(views) * 100,
+    cumulative_share = cumulative_views / sum(views) * 100
+  )
+
+page_concentration %>%
+  filter(rank %in% c(1, 2, 5, 10, 20, 50, 100)) %>%
+  select(
+    rank,
+    page_path_and_screen_class,
+    views,
+    view_share,
+    cumulative_views,
+    cumulative_share
+  )
+
+
+#Understanding Active Users in the page analysis.
+#GA4 reported 55,599 active users for the website during the reporting period. However, summing the Active Users column across individual page rows produces 107,586. This does not mean that the website had 107,586 different users. The same person can visit multiple pages and is therefore counted in the Active Users metric for each page they visit. For example, a person who visits the homepage, Science Talent Search and Resources may appear in the Active Users count of all three pages, while still representing one user at the overall website level. Therefore, the report-level figure of 55,599 is used when describing overall website users, while page-level Active Users are used only to compare the audience reach of individual pages.
+
+
+# ------------------------------------------------------------
+# 9.5 Classify pages by content category
+# ------------------------------------------------------------
+
+pages_classified <- pages %>%
+  mutate(
+    page_category = case_when(
+      
+      page_path_and_screen_class == "/" ~
+        "Homepage",
+      
+      str_detect(
+        page_path_and_screen_class,
+        "science-talent-search|^/sts-"
+      ) ~
+        "Science Talent Search",
+      
+      str_detect(
+        page_path_and_screen_class,
+        "^/event/|^/events|^/events-calendar|^/workshops|conference|stavcon|call-for-abstracts|submitting-a-session|^/series/|^/venue/|^/organiser/"
+      ) ~
+        "Events & Conferences",
+      
+      str_detect(
+        page_path_and_screen_class,
+        "^/publications|^/resources|^/stav-publishing|labtalk|conference-resources|teaching-science-journals|lets-find-out"
+      ) ~
+        "Resources & Publications",
+      
+      str_detect(
+        page_path_and_screen_class,
+        "science-in-construction|national-science-week"
+      ) ~
+        "Science Programs & Initiatives",
+      
+      str_detect(
+        page_path_and_screen_class,
+        "^/shop|^/product|^/product-category|^/cart|^/checkout"
+      ) ~
+        "Shop",
+      
+      str_detect(
+        page_path_and_screen_class,
+        "member|membership"
+      ) ~
+        "Membership",
+      
+      str_detect(
+        page_path_and_screen_class,
+        "^/my-account|^/login"
+      ) ~
+        "Account",
+      
+      str_detect(
+        page_path_and_screen_class,
+        "^/about-us|^/our-team|^/contact-us|^/contact-archive|^/stav-council|^/our-partners|annual-general-meeting|^/our-history|working-party-committees|stav-80th-anniversary"
+      ) ~
+        "Organisation",
+      
+      str_detect(
+        page_path_and_screen_class,
+        "^/forums|^/discussion-forums"
+      ) ~
+        "Forums / Community",
+      
+      str_detect(
+        page_path_and_screen_class,
+        "^/wp-content/uploads/"
+      ) ~
+        "Files",
+      
+      str_detect(
+        page_path_and_screen_class,
+        "^/gh"
+      ) ~
+        "System / Preferences",
+      
+      TRUE ~
+        "Other"
+    )
+  )
+
+
+page_category_summary <- pages_classified %>%
+  group_by(page_category) %>%
+  summarise(
+    page_paths = n(),
+    views = sum(views),
+    .groups = "drop"
+  ) %>%
+  mutate(
+    view_share = views / sum(views) * 100
+  ) %>%
+  arrange(desc(views))
+
+page_category_summary
+
+page_classification_check <- tibble(
+  original_rows = nrow(pages),
+  classified_rows = nrow(pages_classified),
+  original_views = sum(pages$views),
+  classified_views = sum(pages_classified$views)
+)
+
+page_classification_check
+
+
+# ------------------------------------------------------------
+# 9.6 Review unclassified pages
+# ------------------------------------------------------------
+
+pages_classified %>%
+  filter(page_category == "Other") %>%
+  arrange(desc(views)) %>%
+  select(
+    page_path_and_screen_class,
+    views,
+    active_users,
+    views_per_active_user,
+    average_engagement_time_per_active_user
+  ) %>%
+  print(n = 30)
+
+
+# Views represent the number of times pages were viewed,
+# including repeated views by the same person.
+#
+# Active Users represent users who interacted with a particular page.
+# Page-level Active Users should not be added together because the
+# same person may visit multiple pages.
+#
+# For example, one person who visits the homepage, Science Talent
+# Search and Resources may appear in the Active Users count for all
+# three pages. Therefore, the row-level sum of 107,586 does not mean
+# that STAV had 107,586 different users.
+#
+# GA4 reported 55,599 Active Users for the website overall, and this
+# report-level figure should be used when describing the overall audience.
+
+# ------------------------------------------------------------
+# 9.7 Visualise page views by content category
+# ------------------------------------------------------------
+
+ggplot(
+  page_category_summary,
+  aes(
+    x = reorder(page_category, views),
+    y = views
+  )
+) +
+  geom_col() +
+  coord_flip() +
+  scale_y_continuous(labels = scales::comma) +
+  labs(
+    title = "Website Views by Content Category",
+    subtitle = "STAV, 1 July 2025 – 30 June 2026",
+    x = NULL,
+    y = "Views"
+  ) +
+  theme_minimal()
+
+# ------------------------------------------------------------
+# 9.8 Monthly website content analysis
+# ------------------------------------------------------------
+
+# Read monthly Pages and Screens data
+monthly_pages <- read_csv(
+  "data/raw/GA4/pages_screens_page_path_month_20250701_20260630.csv",
+  skip = 9,
+  show_col_types = FALSE
+) %>%
+  clean_names()
+
+
+# ------------------------------------------------------------
+# Classify page paths using the same categories
+# as the annual website content analysis
+# ------------------------------------------------------------
+
+monthly_pages_classified <- monthly_pages %>%
+  mutate(
+    page_category = case_when(
+      
+      page_path_and_screen_class == "/" ~
+        "Homepage",
+      
+      str_detect(
+        page_path_and_screen_class,
+        "science-talent-search|^/sts-"
+      ) ~
+        "Science Talent Search",
+      
+      str_detect(
+        page_path_and_screen_class,
+        "^/event/|^/events|^/events-calendar|^/workshops|conference|stavcon|call-for-abstracts|submitting-a-session|^/series/|^/venue/|^/organiser/"
+      ) ~
+        "Events & Conferences",
+      
+      str_detect(
+        page_path_and_screen_class,
+        "^/publications|^/resources|^/stav-publishing|labtalk|conference-resources|teaching-science-journals|lets-find-out"
+      ) ~
+        "Resources & Publications",
+      
+      str_detect(
+        page_path_and_screen_class,
+        "science-in-construction|national-science-week"
+      ) ~
+        "Science Programs & Initiatives",
+      
+      str_detect(
+        page_path_and_screen_class,
+        "^/shop|^/product|^/product-category|^/cart|^/checkout"
+      ) ~
+        "Shop",
+      
+      str_detect(
+        page_path_and_screen_class,
+        "member|membership"
+      ) ~
+        "Membership",
+      
+      str_detect(
+        page_path_and_screen_class,
+        "^/my-account|^/login"
+      ) ~
+        "Account",
+      
+      str_detect(
+        page_path_and_screen_class,
+        "^/about-us|^/our-team|^/contact-us|^/contact-archive|^/stav-council|^/our-partners|annual-general-meeting|^/our-history|working-party-committees|stav-80th-anniversary"
+      ) ~
+        "Organisation",
+      
+      str_detect(
+        page_path_and_screen_class,
+        "^/forums|^/discussion-forums"
+      ) ~
+        "Forums / Community",
+      
+      str_detect(
+        page_path_and_screen_class,
+        "^/wp-content/uploads/"
+      ) ~
+        "Files",
+      
+      str_detect(
+        page_path_and_screen_class,
+        "^/gh"
+      ) ~
+        "System / Preferences",
+      
+      TRUE ~
+        "Other"
+    )
+  )
+
+
+# ------------------------------------------------------------
+# Convert GA4 month numbers into calendar dates
+# Jul-Dec = 2025
+# Jan-Jun = 2026
+# ------------------------------------------------------------
+
+monthly_pages_classified <- monthly_pages_classified %>%
+  mutate(
+    month_num = as.integer(month),
+    year = if_else(
+      month_num >= 7,
+      2025L,
+      2026L
+    ),
+    month_date = as.Date(
+      sprintf(
+        "%d-%02d-01",
+        year,
+        month_num
+      )
+    )
+  )
+
+
+# ------------------------------------------------------------
+# Summarise monthly views by content category
+# ------------------------------------------------------------
+
+monthly_content <- monthly_pages_classified %>%
+  group_by(
+    month_date,
+    page_category
+  ) %>%
+  summarise(
+    views = sum(
+      views,
+      na.rm = TRUE
+    ),
+    .groups = "drop"
+  ) %>%
+  arrange(
+    month_date,
+    page_category
+  )
+
+
+monthly_content %>%
+  summarise(
+    total_views = sum(views)
+  )
+
+
+# ------------------------------------------------------------
+# 9.9 Monthly website content trends
+# ------------------------------------------------------------
+
+# Ensure every category has all 12 months represented
+monthly_content_complete <- monthly_content %>%
+  complete(
+    month_date = seq(
+      as.Date("2025-07-01"),
+      as.Date("2026-06-01"),
+      by = "month"
+    ),
+    page_category,
+    fill = list(
+      views = 0
+    )
+  )
+
+
+# ------------------------------------------------------------
+# Identify peak and lowest month for each category
+# ------------------------------------------------------------
+
+monthly_peak_low <- monthly_content_complete %>%
+  group_by(page_category) %>%
+  summarise(
+    peak_month =
+      month_date[which.max(views)],
+    
+    peak_views =
+      max(views),
+    
+    lowest_month =
+      month_date[which.min(views)],
+    
+    lowest_views =
+      min(views),
+    
+    .groups = "drop"
+  )
+
+
+# ------------------------------------------------------------
+# Keep business-relevant categories for visualisation
+# ------------------------------------------------------------
+
+monthly_content_plot <- monthly_content_complete %>%
+  filter(
+    !page_category %in% c(
+      "Other",
+      "Files",
+      "System / Preferences"
+    )
+  )
+
+
+# ------------------------------------------------------------
+# Monthly content trend chart
+# ------------------------------------------------------------
+
+ggplot(
+  monthly_content_plot,
+  aes(
+    x = month_date,
+    y = views,
+    group = 1
+  )
+) +
+  
+  geom_line(
+    linewidth = 0.8
+  ) +
+  
+  geom_point(
+    size = 1.8
+  ) +
+  
+  facet_wrap(
+    ~ page_category,
+    scales = "free_y",
+    ncol = 2
+  ) +
+  
+  scale_x_date(
+    breaks = as.Date(c(
+      "2025-07-01",
+      "2025-10-01",
+      "2026-01-01",
+      "2026-04-01"
+    )),
+    date_labels = "%b\n%Y"
+  ) +
+  
+  scale_y_continuous(
+    labels = scales::comma,
+    expand = expansion(
+      mult = c(0.05, 0.12)
+    )
+  ) +
+  
+  labs(
+    title =
+      "Monthly Website Views by Content Category",
+    subtitle =
+      "STAV, July 2025 – June 2026",
+    x = NULL,
+    y = "Page views"
+  ) +
+  
+  theme_minimal() +
+  
+  theme(
+    axis.text.x =
+      element_text(size = 8),
+    
+    axis.text.y =
+      element_text(size = 8),
+    
+    strip.text =
+      element_text(
+        face = "bold",
+        size = 9
+      ),
+    
+    panel.spacing =
+      unit(1.2, "lines")
+  )
+
+
+# ------------------------------------------------------------
+# Peak and lowest month summary table
+# ------------------------------------------------------------
+
+peak_low_table <- monthly_peak_low %>%
+  filter(
+    !page_category %in% c(
+      "Other",
+      "Files",
+      "System / Preferences"
+    )
+  ) %>%
+  mutate(
+    peak_month =
+      format(
+        peak_month,
+        "%b %Y"
+      ),
+    
+    lowest_month =
+      format(
+        lowest_month,
+        "%b %Y"
+      )
+  ) %>%
+  select(
+    page_category,
+    peak_month,
+    peak_views,
+    lowest_month,
+    lowest_views
+  )
+
+peak_low_table
+
