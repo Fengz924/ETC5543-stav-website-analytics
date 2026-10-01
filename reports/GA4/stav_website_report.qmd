@@ -340,3 +340,643 @@ In GA4, "(direct) / (none)" means that GA4 did not identify another source or me
 
 **What this means for STAV:** The previous chart showed that Organic Search was one of STAV's two dominant acquisition channels. Looking more closely at the underlying sources shows that most of this search traffic came from Google (35,636 sessions) and Bing (3,805 sessions). Together with Direct traffic, these three sources accounted for approximately 93.6% of source-level sessions.
 
+# Website Content and Entry Points
+
+## Landing Pages
+
+A landing page is the first page a visitor sees when entering the STAV website. Analysing landing pages helps identify which areas of the website most frequently act as entry points for visitors.
+
+To make the results easier to interpret, individual landing pages were grouped into business-relevant content categories. These categories were created for this analysis and are not native GA4 categories.
+
+```{r}
+#| label: fig-landing-categories
+#| fig-cap: "Main content categories through which visitors entered the STAV website"
+#| fig-width: 9
+#| fig-height: 5.5
+
+landing_classified <- landing %>%
+  mutate(
+    landing_category = case_when(
+      landing_page == "(not set)" ~ "Not set",
+      landing_page == "/" ~ "Homepage",
+
+      str_detect(
+        landing_page,
+        "science-talent-search|^/sts-"
+      ) ~ "Science Talent Search",
+
+      str_detect(
+        landing_page,
+        "^/event/|^/events|^/events-calendar|^/workshops|conference|stavcon|call-for-abstracts|submitting-a-session|^/series/"
+      ) ~ "Events & Conferences",
+
+      str_detect(
+        landing_page,
+        "^/publications|^/resources|^/stav-publishing|labtalk|conference-resources|teaching-science-journals"
+      ) ~ "Resources & Publications",
+
+      str_detect(
+        landing_page,
+        "science-in-construction|national-science-week"
+      ) ~ "Science Programs & Initiatives",
+
+      str_detect(
+        landing_page,
+        "^/shop|^/product|^/product-category|^/cart|^/checkout"
+      ) ~ "Shop",
+
+      str_detect(
+        landing_page,
+        "member|membership"
+      ) ~ "Membership",
+
+      str_detect(
+        landing_page,
+        "^/my-account|^/login"
+      ) ~ "Account",
+
+      str_detect(
+        landing_page,
+        "^/about-us|^/our-team|^/contact-us|^/stav-council|^/our-partners|annual-general-meeting"
+      ) ~ "Organisation",
+
+      str_detect(
+        landing_page,
+        "^/forums"
+      ) ~ "Forums / Community",
+
+      str_detect(
+        landing_page,
+        "^/wp-content/uploads/"
+      ) ~ "Files",
+
+      str_detect(
+        landing_page,
+        "^/gh"
+      ) ~ "System / Preferences",
+
+      TRUE ~ "Other"
+    )
+  )
+
+landing_report_sessions <- 91062
+
+landing_category_summary <- landing_classified %>%
+  group_by(landing_category) %>%
+  summarise(
+    sessions = sum(sessions),
+    .groups = "drop"
+  ) %>%
+  mutate(
+    session_share = sessions / landing_report_sessions
+  )
+
+landing_category_summary %>%
+  slice_max(
+    order_by = sessions,
+    n = 7,
+    with_ties = FALSE
+  ) %>%
+  ggplot(
+    aes(
+      x = reorder(landing_category, sessions),
+      y = sessions
+    )
+  ) +
+  geom_col() +
+  geom_text(
+    aes(
+      label = paste0(
+        scales::comma(sessions),
+        " (",
+        scales::percent(session_share, accuracy = 0.1),
+        ")"
+      )
+    ),
+    hjust = -0.1,
+    size = 3.5
+  ) +
+  coord_flip() +
+  scale_y_continuous(
+    labels = scales::comma,
+    expand = expansion(mult = c(0, 0.27))
+  ) +
+  labs(
+    title = "Main Website Entry Points by Content Category",
+    subtitle = "STAV, July 2025 – June 2026",
+    x = NULL,
+    y = "Landing-page sessions"
+  ) +
+  theme_minimal()
+```
+
+**How to read this chart:**\
+A landing page is the first page viewed when a visitor enters the website. "(not set)" means that GA4 did not record an identifiable landing-page value for those sessions.
+
+**What this means for STAV:** Science Talent Search was the largest website entry category, accounting for approximately 31.7% of landing-page sessions. The Homepage accounted for 17.7%, while Events & Conferences accounted for 15.6%. Together, these three areas represented approximately 65% of report-level sessions.
+
+The (not set) category accounted for 6,566 sessions (7.2%), it represents sessions for which GA4 did not assign a landing-page value. Upon further checking in GA4, page-path information could be associated with this category, with prominent paths including /science-talent-search/, /sts-resources/ and the homepage. However, these paths should not be interpreted as confirmed landing pages, as GA4 did not assign a landing-page value to these sessions.
+
+
+
+## Website Content
+
+```{r}
+#| label: fig-content-categories
+#| fig-cap: "Website views by content category"
+#| fig-width: 9
+#| fig-height: 5.5
+
+pages_classified <- pages %>%
+  mutate(
+    page_category = case_when(
+      page_path_and_screen_class == "/" ~ "Homepage",
+
+      str_detect(
+        page_path_and_screen_class,
+        "science-talent-search|^/sts-"
+      ) ~ "Science Talent Search",
+
+      str_detect(
+        page_path_and_screen_class,
+        "^/event/|^/events|^/events-calendar|^/workshops|conference|stavcon|call-for-abstracts|submitting-a-session|^/series/|^/venue/|^/organiser/"
+      ) ~ "Events & Conferences",
+
+      str_detect(
+        page_path_and_screen_class,
+        "^/publications|^/resources|^/stav-publishing|labtalk|conference-resources|teaching-science-journals|lets-find-out"
+      ) ~ "Resources & Publications",
+
+      str_detect(
+        page_path_and_screen_class,
+        "science-in-construction|national-science-week"
+      ) ~ "Science Programs & Initiatives",
+
+      str_detect(
+        page_path_and_screen_class,
+        "^/shop|^/product|^/product-category|^/cart|^/checkout"
+      ) ~ "Shop",
+
+      str_detect(
+        page_path_and_screen_class,
+        "member|membership"
+      ) ~ "Membership",
+
+      str_detect(
+        page_path_and_screen_class,
+        "^/my-account|^/login"
+      ) ~ "Account",
+
+      str_detect(
+        page_path_and_screen_class,
+        "^/about-us|^/our-team|^/contact-us|^/contact-archive|^/stav-council|^/our-partners|annual-general-meeting|^/our-history|working-party-committees|stav-80th-anniversary"
+      ) ~ "Organisation",
+
+      str_detect(
+        page_path_and_screen_class,
+        "^/forums|^/discussion-forums"
+      ) ~ "Forums / Community",
+
+      str_detect(
+        page_path_and_screen_class,
+        "^/wp-content/uploads/"
+      ) ~ "Files",
+
+      str_detect(
+        page_path_and_screen_class,
+        "^/gh"
+      ) ~ "System / Preferences",
+
+      TRUE ~ "Other"
+    )
+  )
+
+page_category_summary <- pages_classified %>%
+  group_by(page_category) %>%
+  summarise(
+    views = sum(views),
+    .groups = "drop"
+  ) %>%
+  mutate(
+    view_share = views / sum(views)
+  )
+
+page_category_summary %>%
+  slice_max(
+    order_by = views,
+    n = 7,
+    with_ties = FALSE
+  ) %>%
+  ggplot(
+    aes(
+      x = reorder(page_category, views),
+      y = views
+    )
+  ) +
+  geom_col() +
+  geom_text(
+    aes(
+      label = paste0(
+        scales::comma(views),
+        " (",
+        scales::percent(view_share, accuracy = 0.1),
+        ")"
+      )
+    ),
+    hjust = -0.1,
+    size = 3.5
+  ) +
+  coord_flip() +
+  scale_y_continuous(
+    labels = scales::comma,
+    expand = expansion(mult = c(0, 0.25))
+  ) +
+  labs(
+    title = "Website Views by Content Category",
+    subtitle = "STAV, July 2025 – June 2026",
+    x = NULL,
+    y = "Page views"
+  ) +
+  theme_minimal()
+```
+
+Landing pages show where visitors entered the website, while page views provide a broader picture of the content visitors viewed throughout their website sessions.
+
+Across the reporting period, STAV recorded 193,799 page views. Individual page paths were grouped into the same business-relevant content categories used in the landing-page analysis to provide a clearer view of overall content usage.
+
+**How to read this chart:**\
+A page view is recorded each time a page is viewed, including repeated views by the same user. Unlike the previous landing-page analysis, this chart includes pages viewed at any point during a website session, not only the first page visited.
+
+**What this means for STAV:** Science Talent Search was the most-viewed content category, generating 68,467 views, or approximately 35.3% of all website views. Events & Conferences accounted for 14.6%, while the Homepage accounted for 12.8%.
+
+Account-related pages represented 11.6% of all page views, compared with only 3.6% of landing-page sessions. This suggests that Account pages were more commonly encountered during website use than as the initial entry point to the website.
+
+## Monthly Content Trends
+
+Website content varied across the reporting period. The monthly analysis shows that different areas of the STAV website reached their highest levels at different times of the year, rather than following the same pattern throughout the year.
+
+```{r}
+#| label: monthly-content-setup
+#| include: false
+
+
+# ------------------------------------------------------------
+# Classify pages using the same categories as the annual analysis
+# ------------------------------------------------------------
+
+monthly_pages_classified <- monthly_pages %>%
+  mutate(
+    page_category = case_when(
+
+      page_path_and_screen_class == "/" ~
+        "Homepage",
+
+      str_detect(
+        page_path_and_screen_class,
+        "science-talent-search|^/sts-"
+      ) ~
+        "Science Talent Search",
+
+      str_detect(
+        page_path_and_screen_class,
+        "^/event/|^/events|^/events-calendar|^/workshops|conference|stavcon|call-for-abstracts|submitting-a-session|^/series/|^/venue/|^/organiser/"
+      ) ~
+        "Events & Conferences",
+
+      str_detect(
+        page_path_and_screen_class,
+        "^/publications|^/resources|^/stav-publishing|labtalk|conference-resources|teaching-science-journals|lets-find-out"
+      ) ~
+        "Resources & Publications",
+
+      str_detect(
+        page_path_and_screen_class,
+        "science-in-construction|national-science-week"
+      ) ~
+        "Science Programs & Initiatives",
+
+      str_detect(
+        page_path_and_screen_class,
+        "^/shop|^/product|^/product-category|^/cart|^/checkout"
+      ) ~
+        "Shop",
+
+      str_detect(
+        page_path_and_screen_class,
+        "member|membership"
+      ) ~
+        "Membership",
+
+      str_detect(
+        page_path_and_screen_class,
+        "^/my-account|^/login"
+      ) ~
+        "Account",
+
+      str_detect(
+        page_path_and_screen_class,
+        "^/about-us|^/our-team|^/contact-us|^/contact-archive|^/stav-council|^/our-partners|annual-general-meeting|^/our-history|working-party-committees|stav-80th-anniversary"
+      ) ~
+        "Organisation",
+
+      str_detect(
+        page_path_and_screen_class,
+        "^/forums|^/discussion-forums"
+      ) ~
+        "Forums / Community",
+
+      str_detect(
+        page_path_and_screen_class,
+        "^/wp-content/uploads/"
+      ) ~
+        "Files",
+
+      str_detect(
+        page_path_and_screen_class,
+        "^/gh"
+      ) ~
+        "System / Preferences",
+
+      TRUE ~
+        "Other"
+    ),
+
+    month_num = as.integer(month),
+
+    year = if_else(
+      month_num >= 7,
+      2025L,
+      2026L
+    ),
+
+    month_date = as.Date(
+      sprintf(
+        "%d-%02d-01",
+        year,
+        month_num
+      )
+    )
+  )
+
+
+# ------------------------------------------------------------
+# Summarise views by month and content category
+# ------------------------------------------------------------
+
+monthly_content <- monthly_pages_classified %>%
+  group_by(
+    month_date,
+    page_category
+  ) %>%
+  summarise(
+    views = sum(views, na.rm = TRUE),
+    .groups = "drop"
+  ) %>%
+  complete(
+    month_date = seq(
+      as.Date("2025-07-01"),
+      as.Date("2026-06-01"),
+      by = "month"
+    ),
+    page_category,
+    fill = list(views = 0)
+  )
+```
+
+The first chart focuses on STAV's main content, programs, events and resources.
+
+```{r}
+#| label: fig-monthly-content-activities
+#| fig-cap: "Monthly views for STAV content and activity areas"
+#| fig-width: 10
+#| fig-height: 8
+#| fig-align: center
+
+content_activity_categories <- c(
+  "Science Talent Search",
+  "Events & Conferences",
+  "Resources & Publications",
+  "Science Programs & Initiatives",
+  "Shop"
+)
+
+monthly_content %>%
+  filter(
+    page_category %in% content_activity_categories
+  ) %>%
+  mutate(
+    page_category = factor(
+      page_category,
+      levels = content_activity_categories
+    )
+  ) %>%
+  ggplot(
+    aes(
+      x = month_date,
+      y = views,
+      group = 1
+    )
+  ) +
+  geom_line(linewidth = 0.8) +
+  geom_point(size = 1.8) +
+
+  facet_wrap(
+    ~ page_category,
+    scales = "free_y",
+    ncol = 2
+  ) +
+
+  scale_x_date(
+    breaks = as.Date(c(
+      "2025-07-01",
+      "2025-10-01",
+      "2026-01-01",
+      "2026-04-01"
+    )),
+    date_labels = "%b\n%Y"
+  ) +
+
+  scale_y_continuous(
+    labels = scales::comma,
+    expand = expansion(
+      mult = c(0.05, 0.12)
+    )
+  ) +
+
+  labs(
+    title = "Monthly Views of STAV Content and Activities",
+    subtitle = "July 2025 – June 2026",
+    x = NULL,
+    y = "Page views"
+  ) +
+
+  theme_minimal() +
+
+  theme(
+    axis.text.x = element_text(size = 8),
+    axis.text.y = element_text(size = 8),
+    strip.text = element_text(
+      face = "bold",
+      size = 9
+    ),
+    panel.spacing = unit(1.2, "lines")
+  )
+```
+
+Science Talent Search showed the largest monthly variation, reaching **10,082 views in May 2026**, compared with its lowest level of **1,114 views in September 2025**. Events & Conferences peaked at **5,129 views in February 2026**, while Resources & Publications reached its highest level of **1,773 views in October 2025**. Shop activity peaked later in **June 2026**, with **1,521 views**.
+
+These differences indicate that demand for STAV's content and activities varies substantially throughout the year. The timing may reflect STAV's program, event and resource schedules; however, GA4 page-view data alone cannot determine the specific cause of each increase.
+
+
+## Website and Community Functions
+
+The second chart focuses on general website navigation, account, membership, organisation and community functions.
+
+```{r}
+#| label: fig-monthly-content-functions
+#| fig-cap: "Monthly views for STAV website and community functions"
+#| fig-width: 10
+#| fig-height: 8
+#| fig-align: center
+
+website_function_categories <- c(
+  "Homepage",
+  "Account",
+  "Membership",
+  "Organisation",
+  "Forums / Community"
+)
+
+monthly_content %>%
+  filter(
+    page_category %in% website_function_categories
+  ) %>%
+  mutate(
+    page_category = factor(
+      page_category,
+      levels = website_function_categories
+    )
+  ) %>%
+  ggplot(
+    aes(
+      x = month_date,
+      y = views,
+      group = 1
+    )
+  ) +
+  geom_line(linewidth = 0.8) +
+  geom_point(size = 1.8) +
+
+  facet_wrap(
+    ~ page_category,
+    scales = "free_y",
+    ncol = 2
+  ) +
+
+  scale_x_date(
+    breaks = as.Date(c(
+      "2025-07-01",
+      "2025-10-01",
+      "2026-01-01",
+      "2026-04-01"
+    )),
+    date_labels = "%b\n%Y"
+  ) +
+
+  scale_y_continuous(
+    labels = scales::comma,
+    expand = expansion(
+      mult = c(0.05, 0.12)
+    )
+  ) +
+
+  labs(
+    title = "Monthly Views of Website and Community Functions",
+    subtitle = "July 2025 – June 2026",
+    x = NULL,
+    y = "Page views"
+  ) +
+
+  theme_minimal() +
+
+  theme(
+    axis.text.x = element_text(size = 8),
+    axis.text.y = element_text(size = 8),
+    strip.text = element_text(
+      face = "bold",
+      size = 9
+    ),
+    panel.spacing = unit(1.2, "lines")
+  )
+```
+
+The Homepage reached its highest monthly level in **February 2026 with 2,766 views**, while Account pages peaked earlier in **August 2025 with 2,900 views**. Membership also reached its highest level in **February 2026 with 735 views**. These patterns show that the use of general website functions also changed across the year rather than remaining constant.
+
+
+## Peak and Lowest Months
+
+The table below summarises the highest and lowest monthly page-view levels for each business-relevant content category.
+
+```{r}
+#| label: tbl-monthly-content-peak-low
+#| echo: false
+
+peak_low_table <- monthly_content %>%
+  group_by(page_category) %>%
+  summarise(
+    peak_month =
+      month_date[which.max(views)],
+
+    peak_views =
+      max(views),
+
+    lowest_month =
+      month_date[which.min(views)],
+
+    lowest_views =
+      min(views),
+
+    .groups = "drop"
+  ) %>%
+
+  filter(
+    !page_category %in% c(
+      "Other",
+      "Files",
+      "System / Preferences"
+    )
+  ) %>%
+
+  mutate(
+    peak_month =
+      format(
+        peak_month,
+        "%b %Y"
+      ),
+
+    lowest_month =
+      format(
+        lowest_month,
+        "%b %Y"
+      )
+  ) %>%
+
+  rename(
+    "Content category" = page_category,
+    "Peak month" = peak_month,
+    "Peak views" = peak_views,
+    "Lowest month" = lowest_month,
+    "Lowest views" = lowest_views
+  )
+
+knitr::kable(
+  peak_low_table,
+  format.args = list(
+    big.mark = ","
+  ),
+  caption =
+    "Peak and lowest monthly page views by content category"
+)
+```
+
+
