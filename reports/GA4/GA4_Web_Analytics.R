@@ -1611,3 +1611,94 @@ peak_low_table <- monthly_peak_low %>%
 
 peak_low_table
 
+# ============================================================
+# 10. DEVICE CATEGORY ANALYSIS
+# ============================================================
+
+
+# ------------------------------------------------------------
+# 10.1 Import and inspect device data
+# ------------------------------------------------------------
+
+device <- read_csv(
+  "data/raw/GA4/device_category_20250701_20260630.csv",
+  skip = 9,
+  show_col_types = FALSE
+) %>%
+  clean_names()
+
+glimpse(device)
+
+names(device)
+
+
+# ------------------------------------------------------------
+# 10.2 Basic data validation
+# ------------------------------------------------------------
+
+nrow(device)
+
+device
+
+# Check missing device categories
+device %>%
+  summarise(
+    missing_device_category =
+      sum(is.na(device_category))
+  )
+
+# Check duplicate categories
+device %>%
+  count(device_category) %>%
+  filter(n > 1)
+
+# ------------------------------------------------------------
+# 10.3 Device usage summary
+# ------------------------------------------------------------
+
+device_summary <- device %>%
+  mutate(
+    active_user_share =
+      active_users / sum(active_users) * 100,
+    event_share =
+      event_count / sum(event_count) * 100
+  ) %>%
+  arrange(desc(active_users))
+
+device_summary %>%
+  select(
+    device_category,
+    active_users,
+    active_user_share,
+    engagement_rate,
+    engaged_sessions_per_active_user,
+    average_engagement_time_per_active_user,
+    event_count,
+    event_share
+  )
+
+# ------------------------------------------------------------
+# 10.4 Visualise website usage by device
+# ------------------------------------------------------------
+
+ggplot(
+  device_summary,
+  aes(
+    x = reorder(device_category, active_users),
+    y = active_users
+  )
+) +
+  geom_col() +
+  coord_flip() +
+  scale_y_continuous(labels = scales::comma) +
+  labs(
+    title = "Website Active Users by Device Category",
+    subtitle = "STAV, 1 July 2025 – 30 June 2026",
+    x = NULL,
+    y = "Active Users"
+  ) +
+  theme_minimal()
+ 
+
+#Device usage was strongly desktop-oriented. Desktop accounted for 83.4% of device-level Active Users, compared with 15.9% for mobile and less than 1% for tablet. However, mobile users recorded a higher engagement rate (50.4%) than desktop users (42.0%), as well as more engaged sessions per active user (0.80 compared with 0.70). This suggests that the smaller mobile audience was still actively engaging with the website. Tablet results should be interpreted cautiously because of the much smaller audience size.
+
