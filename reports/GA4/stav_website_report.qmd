@@ -96,3 +96,23 @@ events <- read_csv(
   clean_names()
 ```
 
+# Executive Summary
+
+This report analyses STAV website activity using Google Analytics 4 (GA4) data for the period from 1 July 2025 to 30 June 2026. The analysis examines how users reached the website, which content attracted the most activity, the devices and geographic locations associated with website use, and the interactions recorded across the site.
+
+The analysis identified six key findings:
+
+1.  **Most website traffic came from Direct and Organic Search.** Direct accounted for approximately 50.6% of sessions, while Organic Search accounted for 43.5%. Together, these two channels generated around 94% of website sessions. Organic Search also recorded a higher engagement rate (59.3%) than Direct traffic (29.2%), showing that a larger proportion of search sessions met GA4's engagement criteria.
+
+2.  **Science Talent Search (STS) was a central component of website activity.** Science Talent Search content accounted for approximately 31.7% of landing-page sessions and 35.3% of all page views. This means it was important both as a way for visitors to enter the website and as content they viewed while using the site, making it a key area for STAV to maintain and monitor.
+
+3.  **Website attention was concentrated around a relatively small proportion of content.** Website activity was concentrated on a relatively small number of pages. The website has many different pages, but the 100 most-viewed pages generated approximately 87.2% of all page views. This means STAV can focus more attention on maintaining its most frequently viewed pages rather than reviewing every page equally.
+
+4.  **Website usage was strongly desktop-oriented, while mobile users still showed meaningful engagement.** Desktop represented approximately 83.4% of device-level Active Users, compared with 15.9% for mobile. However, mobile recorded a higher engagement rate of 50.4%, compared with 42.0% for desktop. This suggests that mobile remains an important part of the website experience despite its smaller user volume.
+
+5.  **Meaningful website activity was strongly concentrated in Australia.** Australia represented 64.9% of country-level Active Users and generated 85.5% of recorded events. Several international locations recorded relatively high user counts but substantially weaker engagement signals.
+
+6.  **Visitors interacted with the website in several ways beyond simply viewing pages.** GA4 recorded substantial activity including scrolling, form interactions, clicks and file downloads. However, the current tracking does not provide enough detail to identify which specific forms, files or resources generated these interactions. This limits STAV's ability to understand which website activities are most important to users.
+
+Based on these findings, the report recommends prioritising high-demand content such as Science Talent Search, maintaining STAV's Organic Search visibility, regularly testing important mobile website tasks, improving the detail captured for forms and file downloads, and tracking the website actions that matter most to STAV.
+
