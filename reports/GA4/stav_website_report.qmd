@@ -133,3 +133,29 @@ This report focuses specifically on the **GA4 website analytics component** of t
 
 The analysis is intended to support practical decision-making rather than evaluate website performance against an external benchmark. Findings are therefore interpreted using patterns observed within STAV's own GA4 data.
 
+# Methodology
+
+## Data Source
+
+Website analytics data were obtained from STAV's Google Analytics 4 (GA4) property. The reporting period was **1 July 2025 to 30 June 2026**, providing a full year of website activity for analysis.
+
+Separate GA4 reports were exported for traffic acquisition, monthly traffic trends, source/medium, landing pages, pages and screens, device categories, countries and events. These exports provided different views of website acquisition, content usage, audience characteristics and tracked user interactions.
+
+## Data Preparation
+
+The exported GA4 data were cleaned and analysed in R. The data were checked for missing values, duplicate records and inconsistencies before analysis. Monthly data were organised chronologically from July 2025 to June 2026. GA4 report totals were also compared with the exported data as a quality check. Where small differences occurred between reports, the original GA4 values were retained rather than manually adjusted.
+
+## Content Classification
+
+To make the website data easier to understand, individual pages were grouped into broader content categories such as Science Talent Search, Events & Conferences, Resources & Publications, Shop, Membership and Account.
+
+These categories were created specifically for this analysis and are not standard GA4 categories. The original page-level data were retained so that the classifications could be checked where needed.
+
+## Analysis Approach
+
+The analysis examined website traffic over time, how visitors reached the website, which content they viewed, the devices and countries associated with website activity, and the interactions recorded by GA4.
+
+Some GA4 metrics require careful interpretation. In particular, Active Users cannot simply be added across pages, devices or countries, because the same person may appear in more than one row. For example, someone who visits both the homepage and a Science Talent Search page may be counted as an Active User for both pages. Therefore, the GA4 report-level total of 55,599 Active Users is used when describing the overall website audience.
+
+The analysis identifies patterns in the available data, but does not assume that a particular STAV activity caused an increase or decrease in website traffic unless supporting evidence is available.
+
