@@ -1,0 +1,126 @@
+---
+title: "GA4 data quality"
+subtitle: "Coverage, completeness, duplicates, continuity and metric checks"
+author: "Jordan"
+date: today
+format:
+  html: {toc: true, number-sections: true, code-fold: true, embed-resources: true}
+execute: {warning: false, message: false}
+---
+
+# Purpose
+
+This report checks the outputs created by `01_ga4_data_preparation.qmd`.
+Potential issues are reported, not silently deleted or corrected.
+
+# Setup
+
+```{r}
+library(tidyverse)
+library(here)
+library(scales)
+here::i_am("reports/GA4/02_ga4_data_quality.qmd")
+
+clean_dir <- here("data", "clean", "GA4")
+files <- c(
+  demographic = "ga4_demographic_clean.csv",
+  events = "ga4_events_clean.csv",
+  landing_pages = "ga4_landing_pages_clean.csv",
+  pages = "ga4_pages_and_screens_clean.csv",
+  traffic = "ga4_traffic_acquisition_clean.csv"
+)
+stopifnot(all(file.exists(file.path(clean_dir, files))))
+ga4 <- map(files, ~ read_csv(file.path(clean_dir, .x), show_col_types = FALSE))
+```
+
+# Data range and structure
+
+```{r}
+structure_summary <- imap_dfr(ga4, ~ summarise(.x,
+  dataset = .y, rows = n(), columns = ncol(.x),
+  start_date = min(analysis_start_date), end_date = max(analysis_end_date)
+))
+knitr::kable(structure_summary)
+```
+
+# Missing values and duplicate records
+
+```{r}
+missing_summary <- imap_dfr(ga4, ~ tibble(
+  dataset = .y,
+  missing_cells = sum(is.na(.x)),
+  fields_with_missing = sum(map_lgl(.x, ~ any(is.na(.x))))
+))
+
+key_fields <- c(
+  demographic = "country", events = "event_name",
+  landing_pages = "landing_page_original", pages = "page_path_original",
+  traffic = "channel"
+)
+
+duplicate_summary <- imap_dfr(ga4, ~ tibble(
+  dataset = .y,
+  exact_duplicate_rows = sum(duplicated(.x)),
+  duplicate_dimension_values = sum(duplicated(.x[[key_fields[[.y]]]]))
+))
+
+knitr::kable(missing_summary)
+knitr::kable(duplicate_summary)
+```
+
+# Date continuity
+
+Each row only carries the same report start and end dates. There is no daily or
+monthly dimension, so continuity cannot be tested between those dates.
+
+```{r}
+date_quality <- tibble(
+  check = c("Common start date", "Common end date", "Row-level date available",
+    "Daily/monthly continuity test"),
+  result = c(
+    as.character(n_distinct(map_dfr(ga4, ~ select(.x, analysis_start_date))$analysis_start_date) == 1),
+    as.character(n_distinct(map_dfr(ga4, ~ select(.x, analysis_end_date))$analysis_end_date) == 1),
+    "No", "Not computable from current exports"
+  )
+)
+knitr::kable(date_quality)
+```
+
+# Metric anomalies and reconciliation
+
+```{r}
+page_view_events <- ga4$events |>
+  filter(event_name == "page_view") |>
+  summarise(n = sum(event_count, na.rm = TRUE)) |>
+  pull(n)
+
+metric_checks <- tibble(
+  check = c(
+    "Negative numeric cells", "Engagement rates outside 0–1",
+    "Engaged sessions above sessions", "Traffic engagement-rate differences",
+    "Pages with views below active users", "All key-event totals are zero",
+    "Pages views minus page_view events", "Flagged high-volume countries"
+  ),
+  result = c(
+    sum(map_dbl(ga4, ~ sum(select(.x, where(is.numeric)) < 0, na.rm = TRUE))),
+    sum(ga4$traffic$engagement_rate < 0 | ga4$traffic$engagement_rate > 1, na.rm = TRUE) +
+      sum(ga4$demographic$engagement_rate < 0 | ga4$demographic$engagement_rate > 1, na.rm = TRUE),
+    sum(ga4$traffic$engaged_sessions > ga4$traffic$sessions, na.rm = TRUE),
+    sum(ga4$traffic$engagement_rate_difference > 1e-6, na.rm = TRUE),
+    sum(ga4$pages$views < ga4$pages$active_users, na.rm = TRUE),
+    as.numeric(sum(map_dbl(ga4, ~ {
+      if ("key_events" %in% names(.x)) sum(.x$key_events, na.rm = TRUE) else 0
+    })) == 0),
+    sum(ga4$pages$views, na.rm = TRUE) - page_view_events,
+    sum(ga4$demographic$review_flag, na.rm = TRUE)
+  )
+)
+knitr::kable(metric_checks)
+```
+
+# Quality conclusion
+
+The exports are suitable for aggregate traffic and content analysis. The main
+limitations are analytical coverage rather than CSV corruption: no time series,
+no source/medium detail, all Key Event values are zero, and some high-volume
+country rows require investigation before geographic comparisons are trusted.
