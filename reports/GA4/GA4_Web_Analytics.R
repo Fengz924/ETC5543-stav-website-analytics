@@ -470,3 +470,350 @@ key_month_changes
 # attributing the changes to specific causes.
 
 
+# ============================================================
+# 7. LANDING PAGE ANALYSIS
+# ============================================================
+
+
+# ------------------------------------------------------------
+# 7.1 Import and clean landing page data
+# ------------------------------------------------------------
+
+landing_file <-
+  "data/raw/GA4/landing_page_20250701_20260630.csv"
+
+landing <- read_csv(
+  landing_file,
+  skip = 9,
+  show_col_types = FALSE
+) %>%
+  clean_names()
+
+glimpse(landing)
+
+
+# ------------------------------------------------------------
+# 7.2 Basic data validation
+# ------------------------------------------------------------
+
+nrow(landing)
+
+sum(landing$sessions)
+sum(landing$active_users)
+sum(landing$new_users)
+
+# Check missing values
+landing %>%
+  summarise(
+    missing_landing_page = sum(is.na(landing_page)),
+    missing_sessions = sum(is.na(sessions)),
+    missing_active_users = sum(is.na(active_users)),
+    missing_new_users = sum(is.na(new_users))
+  )
+
+# Check duplicate landing-page values
+landing %>%
+  count(landing_page) %>%
+  filter(n > 1)
+
+
+# ------------------------------------------------------------
+# 7.3 Validate row-level sessions against GA4 report total
+# ------------------------------------------------------------
+
+# GA4 report-level total shown in the Landing Page report
+landing_report_sessions <- 91062
+
+landing_row_sessions <- sum(landing$sessions)
+
+landing_session_difference <-
+  landing_row_sessions - landing_report_sessions
+
+landing_session_difference_pct <-
+  landing_session_difference /
+  landing_report_sessions * 100
+
+landing_row_sessions
+landing_report_sessions
+landing_session_difference
+landing_session_difference_pct
+
+
+# Data validation note:
+#
+# The GA4 Landing Page report displayed a report-level total of
+# 91,062 sessions, while summing the 1,759 landing-page rows produced
+# 91,178 sessions.
+#
+# Difference = 116 sessions (approximately 0.13%).
+#
+# No missing landing-page values (NA) or duplicate landing-page rows
+# were found.
+#
+# GA4 report totals and dimension-level rows are not always strictly
+# additive. Approximate distinct counting and differences in query
+# aggregation may contribute to small discrepancies.
+#
+# Analysis decision:
+# - Use the GA4 report-level total when describing overall sessions.
+# - Use row-level values when comparing individual landing pages.
+# - Do not manually adjust row-level values to force totals to match.
+#
+# Active users should NOT be summed across landing-page rows because
+# the same user may appear under multiple landing pages across
+# different sessions.
+
+
+# ------------------------------------------------------------
+# 7.4 Investigate "(not set)"
+# ------------------------------------------------------------
+
+not_set_check <- landing %>%
+  filter(landing_page == "(not set)") %>%
+  mutate(
+    session_share_of_report =
+      sessions / landing_report_sessions * 100
+  )
+
+not_set_check
+
+
+# Data-quality finding:
+#
+# "(not set)" accounted for 6,566 sessions, approximately 7.2% of
+# the GA4 report-level session total.
+#
+# This represents sessions for which GA4 did not populate an
+# identifiable landing-page value.
+#
+# It is retained as a measurement/data-quality finding and excluded
+# only when analysing identifiable content landing pages.
+
+
+# ------------------------------------------------------------
+# 7.5 Inspect highest-traffic landing pages
+# ------------------------------------------------------------
+
+landing %>%
+  arrange(desc(sessions)) %>%
+  select(
+    landing_page,
+    sessions,
+    active_users,
+    new_users,
+    average_engagement_time_per_session
+  ) %>%
+  print(n = 20)
+
+
+# ------------------------------------------------------------
+# 7.6 Top 15 identifiable landing pages
+# ------------------------------------------------------------
+
+top_landing <- landing %>%
+  filter(landing_page != "(not set)") %>%
+  arrange(desc(sessions)) %>%
+  slice_head(n = 15) %>%
+  mutate(
+    session_share =
+      sessions / landing_report_sessions * 100
+  ) %>%
+  select(
+    landing_page,
+    sessions,
+    session_share,
+    active_users,
+    new_users,
+    average_engagement_time_per_session
+  )
+
+top_landing
+
+
+# ------------------------------------------------------------
+# 7.7 Landing-page traffic concentration
+# ------------------------------------------------------------
+
+landing_concentration <- landing %>%
+  filter(landing_page != "(not set)") %>%
+  arrange(desc(sessions)) %>%
+  mutate(
+    rank = row_number(),
+    cumulative_sessions = cumsum(sessions),
+    cumulative_share =
+      cumulative_sessions / landing_report_sessions * 100
+  )
+
+# Examine concentration at selected ranks
+landing_concentration_summary <- landing_concentration %>%
+  filter(
+    rank %in% c(1, 2, 5, 10, 15, 20, 50, 100)
+  ) %>%
+  select(
+    rank,
+    landing_page,
+    sessions,
+    cumulative_sessions,
+    cumulative_share
+  )
+
+landing_concentration_summary
+
+# ------------------------------------------------------------
+# 7.8 Classify landing pages by content type
+# Final classification rules
+# ------------------------------------------------------------
+
+landing_classified <- landing %>%
+  mutate(
+    landing_category = case_when(
+      
+      # Data quality
+      landing_page == "(not set)" ~
+        "Not set",
+      
+      # Homepage
+      landing_page == "/" ~
+        "Homepage",
+      
+      # Science Talent Search
+      str_detect(
+        landing_page,
+        "science-talent-search|^/sts-"
+      ) ~
+        "Science Talent Search",
+      
+      # Events, conferences and workshops
+      str_detect(
+        landing_page,
+        "^/event/|^/events|^/events-calendar|^/workshops|conference|stavcon|call-for-abstracts|submitting-a-session|^/series/"
+      ) ~
+        "Events & Conferences",
+      
+      # Publications and educational resources
+      str_detect(
+        landing_page,
+        "^/publications|^/resources|^/stav-publishing|labtalk|conference-resources|teaching-science-journals"
+      ) ~
+        "Resources & Publications",
+      
+      # Science programs and initiatives
+      str_detect(
+        landing_page,
+        "science-in-construction|national-science-week"
+      ) ~
+        "Science Programs & Initiatives",
+      
+      # Shop / products / cart
+      str_detect(
+        landing_page,
+        "^/shop|^/product|^/product-category|^/cart|^/checkout"
+      ) ~
+        "Shop",
+      
+      # Membership
+      str_detect(
+        landing_page,
+        "member|membership"
+      ) ~
+        "Membership",
+      
+      # User account / login
+      str_detect(
+        landing_page,
+        "^/my-account|^/login"
+      ) ~
+        "Account",
+      
+      # STAV organisational information
+      str_detect(
+        landing_page,
+        "^/about-us|^/our-team|^/contact-us|^/stav-council|^/our-partners|annual-general-meeting"
+      ) ~
+        "Organisation",
+      
+      # Forums / community
+      str_detect(
+        landing_page,
+        "^/forums"
+      ) ~
+        "Forums / Community",
+      
+      # Direct files
+      str_detect(
+        landing_page,
+        "^/wp-content/uploads/"
+      ) ~
+        "Files",
+      
+      # System / preference pages
+      str_detect(
+        landing_page,
+        "^/gh"
+      ) ~
+        "System / Preferences",
+      
+      # Everything not clearly classified
+      TRUE ~
+        "Other"
+    )
+  )
+# ------------------------------------------------------------
+# 7.9 Validate landing-page classification
+# ------------------------------------------------------------
+
+landing_category_summary <- landing_classified %>%
+  group_by(landing_category) %>%
+  summarise(
+    landing_pages = n(),
+    sessions = sum(sessions),
+    .groups = "drop"
+  ) %>%
+  mutate(
+    session_share =
+      sessions / landing_report_sessions * 100
+  ) %>%
+  arrange(desc(sessions))
+
+landing_category_summary
+
+
+# Check that classification has not lost any rows or sessions
+classification_check <- tibble(
+  original_rows = nrow(landing),
+  classified_rows = nrow(landing_classified),
+  original_sessions = sum(landing$sessions),
+  classified_sessions = sum(landing_classified$sessions)
+)
+
+classification_check
+
+
+# ------------------------------------------------------------
+# 7.10 Visualise sessions by landing-page category
+# ------------------------------------------------------------
+
+landing_category_plot <- landing_category_summary %>%
+  filter(landing_category != "Not set")
+
+ggplot(
+  landing_category_plot,
+  aes(
+    x = reorder(landing_category, sessions),
+    y = sessions
+  )
+) +
+  geom_col() +
+  coord_flip() +
+  scale_y_continuous(
+    labels = scales::comma
+  ) +
+  labs(
+    title = "Website Sessions by Landing Page Category",
+    subtitle = "STAV, July 2025 – June 2026",
+    x = NULL,
+    y = "Sessions"
+  ) +
+  theme_minimal()
+
+
