@@ -1,0 +1,223 @@
+---
+title: "GA4 data preparation"
+subtitle: "Import, standardisation and reusable clean outputs"
+author: "Jordan"
+date: today
+format:
+  html:
+    toc: true
+    number-sections: true
+    code-fold: true
+    embed-resources: true
+execute:
+  warning: false
+  message: false
+---
+
+# Purpose
+
+This report is the single preparation stage for the GA4 pipeline. It imports
+the five supplied GA4 exports, validates the expected variables, cleans names
+and numeric fields, standardises page paths, adds the common reporting period,
+and writes analysis-ready CSV files. Raw exports are never overwritten.
+
+# Setup and source contract
+
+```{r}
+library(tidyverse)
+library(janitor)
+library(here)
+
+options(scipen = 999)
+here::i_am("reports/GA4/01_ga4_data_preparation.qmd")
+
+raw_dir <- here("data", "raw", "GA4")
+clean_dir <- here("data", "clean", "GA4")
+analysis_start_date <- as.Date("2025-07-01")
+analysis_end_date <- as.Date("2026-06-30")
+
+source_files <- c(
+  demographic = "Demographic_details_Country.csv",
+  events = "Events_Event_name.csv",
+  landing_pages = "Landing_page_Landing_page.csv",
+  pages = "Pages_and_screens_Page_path_and_screen_class.csv",
+  traffic = "Traffic_acquisition_Session_primary_channel_group_(Default_Channel_Group).csv"
+)
+
+stopifnot(all(file.exists(file.path(raw_dir, source_files))))
+```
+
+# Import and select variables
+
+GA4 CSVs contain nine report-metadata rows before the header. All analytical
+columns are imported as text first so type conversion is explicit and auditable.
+
+```{r}
+read_ga4 <- function(file) {
+  read_csv(
+    file.path(raw_dir, file), skip = 9,
+    col_types = cols(.default = col_character()),
+    trim_ws = TRUE, show_col_types = FALSE
+  ) |>
+    clean_names() |>
+    mutate(across(where(is.character), ~ na_if(str_squish(.x), "")))
+}
+
+ga4_raw <- map(source_files, read_ga4)
+
+required_fields <- list(
+  demographic = c("country", "active_users", "new_users", "engaged_sessions",
+    "engagement_rate", "engaged_sessions_per_active_user",
+    "average_engagement_time_per_active_user", "event_count", "key_events",
+    "user_key_event_rate", "total_revenue"),
+  events = c("event_name", "event_count", "total_users",
+    "event_count_per_active_user", "total_revenue"),
+  landing_pages = c("landing_page", "sessions", "active_users", "new_users",
+    "average_engagement_time_per_session", "key_events", "total_revenue",
+    "session_key_event_rate"),
+  pages = c("page_path_and_screen_class", "views", "active_users",
+    "views_per_active_user", "average_engagement_time_per_active_user",
+    "event_count", "key_events", "total_revenue"),
+  traffic = c("session_primary_channel_group_default_channel_group", "sessions",
+    "engaged_sessions", "engagement_rate", "average_engagement_time_per_session",
+    "events_per_session", "event_count", "key_events", "session_key_event_rate",
+    "total_revenue")
+)
+
+walk2(ga4_raw, required_fields, ~ stopifnot(all(.y %in% names(.x))))
+ga4_selected <- map2(ga4_raw, required_fields, ~ select(.x, all_of(.y)))
+```
+
+# Clean dates and numeric fields
+
+The dates are report-level metadata, not row-level observations. Consequently,
+these files support full-period summaries but not daily or monthly trends.
+
+```{r}
+parse_number_strict <- function(x) readr::parse_number(
+  x, na = c("", "NA"), locale = locale(grouping_mark = ",")
+)
+
+dimension_fields <- c(
+  "country", "event_name", "landing_page",
+  "page_path_and_screen_class",
+  "session_primary_channel_group_default_channel_group"
+)
+
+ga4_typed <- map(
+  ga4_selected,
+  ~ mutate(.x, across(-any_of(dimension_fields), parse_number_strict))
+)
+
+add_period <- function(x) mutate(
+  x,
+  analysis_start_date = analysis_start_date,
+  analysis_end_date = analysis_end_date
+)
+```
+
+# Create analysis-ready tables
+
+```{r}
+standardise_path <- function(x) {
+  out <- x |> str_squish() |> str_remove("\\?.*$")
+  if_else(out %in% c("/", "(not set)"), out, str_remove(out, "/+$"))
+}
+
+demographic_clean <- ga4_typed$demographic |>
+  mutate(
+    new_user_ratio = if_else(active_users > 0, new_users / active_users, NA_real_),
+    review_flag = active_users >= 500 &
+      (engagement_rate < 0.15 | average_engagement_time_per_active_user < 10)
+  ) |>
+  add_period()
+
+events_clean <- ga4_typed$events |>
+  mutate(
+    event_category = case_when(
+      event_name %in% c("page_view", "session_start", "first_visit",
+        "user_engagement", "scroll") ~ "Standard/enhanced measurement",
+      str_detect(event_name, regex("form|register|sign_up|purchase|member",
+        ignore_case = TRUE)) ~ "Potential business conversion",
+      str_detect(event_name, regex("click|download|file|video",
+        ignore_case = TRUE)) ~ "Content interaction",
+      TRUE ~ "Other"
+    )
+  ) |>
+  add_period()
+
+traffic_clean <- ga4_typed$traffic |>
+  rename(channel = session_primary_channel_group_default_channel_group) |>
+  mutate(
+    session_share = sessions / sum(sessions, na.rm = TRUE),
+    engagement_rate_check = engaged_sessions / sessions,
+    engagement_rate_difference = abs(engagement_rate - engagement_rate_check)
+  ) |>
+  add_period()
+
+landing_pages_clean <- ga4_typed$landing_pages |>
+  rename(landing_page_original = landing_page) |>
+  mutate(
+    has_query_parameter = str_detect(landing_page_original, fixed("?")),
+    landing_page_standardised = standardise_path(landing_page_original)
+  ) |>
+  add_period()
+
+pages_clean <- ga4_typed$pages |>
+  rename(page_path_original = page_path_and_screen_class) |>
+  mutate(
+    has_query_parameter = str_detect(page_path_original, fixed("?")),
+    page_path_standardised = standardise_path(page_path_original),
+    page_path_template = page_path_standardised |>
+      str_replace_all("(/view-order/)\\d+", "\\1{id}") |>
+      str_replace_all("(/view-subscription/)\\d+", "\\1{id}") |>
+      str_replace_all("(/members-area/)\\d+", "\\1{id}") |>
+      str_replace_all("(/groups/)\\d+", "\\1{id}") |>
+      str_replace_all("(/join-group/)[A-Za-z0-9_-]{16,}", "\\1{token}"),
+    page_path_was_templated = page_path_template != page_path_standardised
+  ) |>
+  add_period()
+```
+
+These exports have different grains (country, event, landing page, page path
+and channel). They cannot be row-joined without inventing relationships. Their
+valid merge is a manifest that links each table to the same reporting period.
+
+```{r}
+clean_outputs <- list(
+  ga4_demographic_clean = demographic_clean,
+  ga4_events_clean = events_clean,
+  ga4_landing_pages_clean = landing_pages_clean,
+  ga4_pages_and_screens_clean = pages_clean,
+  ga4_traffic_acquisition_clean = traffic_clean
+)
+
+ga4_output_manifest <- imap_dfr(clean_outputs, ~ tibble(
+  dataset = .y, file_name = paste0(.y, ".csv"),
+  rows = nrow(.x), columns = ncol(.x),
+  analysis_start_date = analysis_start_date,
+  analysis_end_date = analysis_end_date
+))
+
+knitr::kable(ga4_output_manifest)
+```
+
+# Write clean data
+
+```{r}
+dir.create(clean_dir, recursive = TRUE, showWarnings = FALSE)
+iwalk(clean_outputs, ~ write_csv(.x, file.path(clean_dir, paste0(.y, ".csv")), na = ""))
+write_csv(ga4_output_manifest, file.path(clean_dir, "ga4_output_manifest.csv"), na = "")
+
+ga4_cleaning_log <- tribble(
+  ~step, ~rule, ~result,
+  "Import", "Skip nine GA4 metadata rows", "Completed",
+  "Variables", "Validate and retain analysis fields", "Completed",
+  "Types", "Parse numeric fields explicitly", "Completed",
+  "Dates", "Attach report-level start and end dates", "Completed",
+  "Paths", "Preserve original paths and add standardised/template fields", "Completed",
+  "Merge", "Link different grains through a common-period manifest", "Completed"
+)
+write_csv(ga4_cleaning_log, file.path(clean_dir, "ga4_cleaning_log.csv"))
+knitr::kable(ga4_cleaning_log)
+```
