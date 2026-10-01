@@ -1297,3 +1297,35 @@ These results show substantial use of website content and functions. However, th
 
 
 
+# Recent User Journey Exploration
+
+This supplementary analysis uses GA4 Path Exploration to examine recent website navigation behaviour. As historical Exploration data was not available for the main reporting period, the analysis uses the currently available period from 1 August to 30 September 2026.
+
+## Science Talent Search User Journey
+
+```{r}
+#| echo: false
+#| out-width: "90%"
+#| fig-align: center
+#| fig-cap: "Navigation paths following the Science Talent Search page, 1 August–30 September 2026"
+
+knitr::include_graphics("../data/GA4/ga4_sts_path_exploration_aug_sep_2026.png")
+```
+
+Using /science-talent-search/ as the starting point, the most common next-page paths included the homepage (97 events), the 2025 Awards Showcase (94), STS Resources (79), Latest News (28), My Account (26) and STS Entries (25). This indicates that users navigating beyond the main STS page frequently continued to other STS-related content, particularly the Awards Showcase and STS Resources.
+
+## Homepage User Journey
+
+```{r}
+#| echo: false
+#| out-width: "90%"
+#| fig-align: center
+#| fig-cap: "Navigation paths following the homepage, 1 August–30 September 2026"
+
+knitr::include_graphics("../data/GA4/ga4_homepage_path_exploration_aug_sep_2026.png")
+```
+
+
+Using the homepage (/) as the starting point, GA4 recorded 3,761 events at this node during the exploration period. The most common next-page paths included /testing-redirect-a/ (292 events), /my-account/ (235), /events/ (134), /science-talent-search/ (132), /publications/trial-exams/ (126) and /become-a-member/ (83).
+The results show that users navigating beyond the homepage moved across several important STAV functions and content areas, including account access, events, Science Talent Search, publications and membership. This suggests that the homepage acts as a navigation point to multiple areas of the website rather than directing users primarily toward a single content area.
+These figures represent path events in GA4 Exploration rather than unique users.
