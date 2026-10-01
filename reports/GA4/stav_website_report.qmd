@@ -1,0 +1,98 @@
+---
+title: "STAV Website Analytics Report"
+subtitle: "Google Analytics 4 Analysis"
+author: "Feng Zhu"
+date: "2026-09-30"
+
+format:
+  html:
+    toc: true
+    toc-depth: 2
+    number-sections: true
+    embed-resources: true
+
+execute:
+  echo: false
+  warning: false
+  message: false
+
+editor: visual
+---
+
+```{r}
+#| label: setup
+#| include: false
+
+library(tidyverse)
+library(janitor)
+library(lubridate)
+```
+
+```{r}
+#| label: load-data
+#| include: false
+
+monthly <- read_csv(
+  "../data/GA4/traffic_channel_monthly_20250701_20260630.csv",
+  skip = 9,
+  show_col_types = FALSE
+) %>%
+  clean_names()
+
+channels <- read_csv(
+  "../data/GA4/traffic_channel_20250701_20260630.csv",
+  skip = 9,
+  show_col_types = FALSE
+) %>%
+  clean_names()
+
+source_medium <- read_csv(
+  "../data/GA4/traffic_source_medium_20250701_20260630.csv",
+  skip = 9,
+  show_col_types = FALSE
+) %>%
+  clean_names()
+
+landing <- read_csv(
+  "../data/GA4/landing_page_20250701_20260630.csv",
+  skip = 9,
+  show_col_types = FALSE
+) %>%
+  clean_names()
+
+pages <- read_csv(
+  "../data/GA4/pages_screens_page_path_20250701_20260630.csv",
+  skip = 9,
+  show_col_types = FALSE
+) %>%
+  clean_names()
+
+monthly_pages <- read_csv(
+  "../data/GA4/pages_screens_page_path_month_20250701_20260630.csv",
+  skip = 9,
+  show_col_types = FALSE
+) %>%
+  clean_names()
+
+device <- read_csv(
+  "../data/GA4/device_category_20250701_20260630.csv",
+  skip = 9,
+  show_col_types = FALSE
+) %>%
+  clean_names()
+
+country <- read_csv(
+  "../data/GA4/country_20250701_20260630.csv",
+  skip = 9,
+  show_col_types = FALSE
+) %>%
+  clean_names()
+
+events <- read_csv(
+  "../data/GA4/events_20250701_20260630.csv",
+  skip = 9,
+  show_col_types = FALSE
+) %>%
+  clean_names()
+```
+
