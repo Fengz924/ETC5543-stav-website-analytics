@@ -1364,3 +1364,39 @@ GA4 provides report-level counts of new and returning users for the full reporti
 ###  Historical User Journey Analysis
 A detailed analysis of where users navigated next or exited the website could not be reproduced for the full reporting period using the currently available GA4 data. Historical path-level analysis would require Exploration data beyond what is currently available in the property's data-retention window.
 
+# Recommendations
+
+Based on the findings, five practical actions are recommended for STAV.
+
+### 1. Focus website maintenance on the most-used content
+
+Science Talent Search was the largest content area, accounting for 31.7% of landing-page sessions and 35.3% of page views. Event and conference pages were also among the most frequently viewed areas of the website.
+
+STAV should prioritise these high-use pages when reviewing website content. A simple approach would be to review the 20 most-viewed pages every three months and check for outdated information, broken links and unclear navigation.
+
+### 2. Protect important pages that receive search traffic
+
+Organic Search generated 43.5% of annual website sessions, with Google providing most of this traffic.
+
+Before deleting, renaming or moving an important page, STAV should check whether it receives significant search traffic. If a page URL changes, the old URL should redirect users to the new page. Clear page titles and headings should also be maintained on important STAV content.
+
+### 3. Regularly test important tasks on mobile
+
+Mobile represented 15.9% of device-level Active Users and recorded a 50.4% engagement rate.
+
+STAV should regularly test important website tasks on a mobile phone, such as finding an event, accessing STS information, downloading a resource, completing a form and using account functions. Problems affecting these important tasks should be prioritised when website improvements are made.
+
+### 4. Track which forms and files users interact with
+
+GA4 recorded substantial form and download activity, but the current data does not clearly show which forms were submitted or which files were downloaded.
+
+STAV should add more detail to these events. For example, form events could include a `form_name`, while download events could include a `file_name` and `resource_type`.
+
+This would allow STAV to identify which forms and resources are actually being used most often.
+
+### 5. Set up meaningful Key Events and regular reporting
+
+No Key Events were recorded in the analysed GA4 reports. STAV should identify the website actions that are most important to the organisation and track these as Key Events in GA4. For example, this could include completing an important form or another website action that STAV wants to measure.
+
+STAV could then review a simple GA4 report every month or quarter covering website traffic, popular content, traffic sources and important user actions. This would make it easier to understand not only how people use the website, but also whether they complete the actions that matter to STAV.
+
