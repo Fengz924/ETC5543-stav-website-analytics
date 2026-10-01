@@ -1,0 +1,572 @@
+---
+title: "GA4 summary and recommendations"
+subtitle: "Integrated findings, implications and next actions"
+author: "Jordan"
+date: today
+format:
+  html:
+    toc: true
+    toc-depth: 2
+    number-sections: true
+    embed-resources: true
+execute: {warning: false, message: false, echo: false}
+---
+
+```{r, include=FALSE}
+library(tidyverse)
+library(here)
+library(scales)
+options(scipen = 999)
+here::i_am("reports/GA4/05_ga4_summary_recommendations.qmd")
+
+read_clean <- function(x) read_csv(here("data", "clean", "GA4", x), show_col_types = FALSE)
+demographic <- read_clean("ga4_demographic_clean.csv")
+events <- read_clean("ga4_events_clean.csv")
+landing <- read_clean("ga4_landing_pages_clean.csv")
+pages <- read_clean("ga4_pages_and_screens_clean.csv")
+traffic <- read_clean("ga4_traffic_acquisition_clean.csv")
+
+total_sessions <- sum(traffic$sessions)
+total_engaged <- sum(traffic$engaged_sessions)
+overall_er <- total_engaged / total_sessions
+weighted_time <- weighted.mean(traffic$average_engagement_time_per_session, traffic$sessions)
+total_views <- sum(pages$views)
+total_events <- sum(traffic$event_count)
+page_view <- events |> filter(event_name == "page_view")
+direct <- traffic |> filter(channel == "Direct")
+organic <- traffic |> filter(channel == "Organic Search")
+referral <- traffic |> filter(channel == "Referral")
+ai_assistant <- traffic |> filter(channel == "AI Assistant")
+email_sessions <- sum(traffic$sessions[traffic$channel == "Email"])
+landing_total <- sum(landing$sessions)
+not_set_sessions <- sum(landing$sessions[landing$landing_page_original == "(not set)"])
+not_set_share <- not_set_sessions / landing_total
+session_difference <- total_sessions - landing_total
+# Select one report for the headline total. Adding the same metric across
+# reports would double-count it because each report is a different breakdown.
+reported_key_events <- sum(traffic$key_events)
+key_event_reconciliation <- tibble(
+  report = c("Traffic acquisition", "Landing pages", "Pages and screens", "Country"),
+  key_events = c(sum(traffic$key_events), sum(landing$key_events),
+    sum(pages$key_events), sum(demographic$key_events))
+)
+scroll_events <- events |> filter(event_name == "scroll")
+scroll_to_view_ratio <- scroll_events$event_count / total_views
+templated_rows <- sum(pages$page_path_was_templated)
+review_pages <- pages |>
+  filter(views >= 100, average_engagement_time_per_active_user < 10,
+         page_path_standardised != "(not set)") |>
+  arrange(average_engagement_time_per_active_user, desc(views))
+flagged_countries <- demographic |> filter(review_flag) |> arrange(desc(active_users))
+```
+
+# Quick guide to the measures {.unnumbered}
+
+Use this table as a glossary while reading the report. Counts at different
+levels should not be added together.
+
+```{r}
+measure_guide <- tribble(
+  ~measure, ~short_description,
+  "Total users", "Distinct users GA4 identified as triggering the relevant event during the period",
+  "Active users", "Users GA4 classified as engaged or active during the period",
+  "New users", "Users GA4 identified as visiting for the first time",
+  "Sessions", "Continuous visits; one user can generate more than one session",
+  "Engaged sessions", "Sessions lasting over 10 seconds, containing a Key Event, or containing 2+ page views",
+  "Engagement rate", "Engaged sessions divided by all sessions",
+  "Average engagement seconds per session", "Average active engagement time recorded for one visit",
+  "Landing page", "The first page of a session",
+  "Page views / Views", "Times pages were viewed, including repeat views and refreshes",
+  "Views per active user", "Page views divided by active users for that page",
+  "Average engagement seconds per active user", "Page engagement time divided by active users for that page",
+  "Event count", "Total recorded interactions such as page_view, scroll or click",
+  "Events per session", "Event count divided by sessions",
+  "Key Events", "Events configured to represent important business outcomes",
+  "Channel", "GA4 category describing how a session arrived, such as Direct or Organic Search",
+  "Share of all sessions", "A channel's sessions divided by sessions across all channels",
+  "(not set)", "GA4 could not determine a value for the dimension"
+)
+knitr::kable(measure_guide, caption = "Short descriptions of measures used in this report")
+```
+
+# Executive summary
+
+```{r}
+headline_kpis <- tibble(
+  measure = c("Total users who triggered page_view", "Sessions", "Page views",
+    "Engaged sessions", "Overall engagement rate",
+    "Average engagement time/session", "Events", "Reported Key Events"),
+  result = c(comma(page_view$total_users), comma(total_sessions), comma(total_views),
+    comma(total_engaged), percent(overall_er, 0.1),
+    paste0(number(weighted_time, 0.1), " seconds"), comma(total_events),
+    comma(reported_key_events)),
+  short_description = c(
+    "Users who triggered at least one page_view",
+    "Continuous website visits",
+    "Page loads and repeat views",
+    "Sessions meeting at least one GA4 engagement condition",
+    "Share of sessions classified as engaged",
+    "Average active engagement time for each session",
+    "All recorded website interactions",
+    "Tracked business outcomes available in these exports")
+)
+knitr::kable(
+  headline_kpis,
+  caption = "Headline website activity",
+  align = c("l", "r", "l")
+)
+```
+
+## Reading the headline numbers
+
+Read the four activity measures as a sequence, not as numbers to add together:
+
+```text
+55,603 users
+→ made 92,227 visits (sessions)
+→ viewed 193,799 pages
+→ generated 605,209 recorded interactions (events)
+```
+
+One user can visit more than once, one visit can contain several page views,
+and one page view can generate several events. For example, opening a page,
+scrolling near the bottom and clicking an external link can create one page view
+and several events within the same session.
+
+The reporting period is **`r format(min(traffic$analysis_start_date), '%d %B %Y')`
+to `r format(max(traffic$analysis_end_date), '%d %B %Y')`**. Of the
+**`r comma(total_sessions)` sessions**, **`r comma(total_engaged)`** met at least
+one GA4 engagement condition. This produces an overall engagement rate of
+**`r percent(overall_er, 0.1)`**. Average recorded engagement time was
+**`r number(weighted_time, 0.1)` seconds per session**.
+
+The website attracts substantial interest in Science Talent Search, member
+resources, events and publications. Organic Search is the strongest large
+channel on engagement. Direct supplies the most sessions but engages materially
+less strongly and may contain untagged campaign traffic. The central weakness
+is measurement rather than lack of activity: form interactions exist, but no
+supplied report contains a non-zero Key Event. STAV therefore cannot yet connect
+traffic and content consumption to registrations, memberships or other outcomes.
+
+# Where visits came from (Acquisition)
+
+The table below provides the common evidence base for the channel findings that
+follow. **Share of all sessions** is calculated as:
+
+```text
+Sessions for the channel ÷ Sessions across all channels
+```
+
+It measures traffic contribution, not user share, engagement quality or
+conversion performance.
+
+```{r}
+traffic |>
+  arrange(desc(sessions)) |>
+  transmute(
+    channel,
+    sessions = comma(sessions),
+    `share of all sessions` = percent(session_share, 0.1),
+    engagement_rate = percent(engagement_rate, 0.1),
+    `average engagement seconds per session` = number(
+      average_engagement_time_per_session, 0.1
+    ),
+    events_per_session = number(events_per_session, 0.01)
+  ) |>
+  knitr::kable(
+    caption = "Channel comparison used in Sections 2.1–2.3",
+    align = c("l", "r", "r", "r", "r", "r")
+  )
+```
+
+::: {.callout-note title="How engagement rate is calculated and recorded"}
+**Engagement rate = engaged sessions / all sessions.** GA4 marks a session as
+engaged when it lasts more than 10 seconds, contains at least one Key Event, or
+contains at least two page or screen views. The website tag sends events and
+engagement-time information to GA4; GA4 then determines whether each session
+meets at least one of these conditions. It is a session-quality indicator, not
+a conversion rate or a direct measure of satisfaction.
+:::
+
+## Direct brings scale, but attribution and engagement need attention
+
+Direct generated **`r comma(direct$sessions)` sessions
+(`r percent(direct$session_share, 0.1)`)**, making it the largest channel. Its
+engagement rate was **`r percent(direct$engagement_rate, 0.1)`**, compared with
+**`r percent(organic$engagement_rate, 0.1)`** for Organic Search. Average
+engagement time was **`r number(direct$average_engagement_time_per_session, 0.1)`
+seconds** for Direct versus **`r number(organic$average_engagement_time_per_session,
+0.1)` seconds** for Organic Search.
+
+This does not prove that Direct visitors are less valuable. With no source,
+medium or campaign fields, Direct may include email, social, partner or offline
+links missing campaign parameters. A **`r percent(direct$session_share, 0.1)`
+Direct share** combined with only **`r comma(email_sessions)` Email sessions**
+is a strong reason to audit campaign tagging.
+
+## Organic Search is the strongest established acquisition channel
+
+Organic Search contributed **`r comma(organic$sessions)` sessions
+(`r percent(organic$session_share, 0.1)`)** with a
+**`r percent(organic$engagement_rate, 0.1)` engagement rate**. Referral was
+smaller at **`r comma(referral$sessions)` sessions**, but achieved a similar
+**`r percent(referral$engagement_rate, 0.1)` engagement rate**. Search visibility
+and relevant external links appear important and should be protected during
+website or URL changes.
+
+## AI Assistant is visible but currently very small
+
+AI Assistant generated **`r comma(ai_assistant$sessions)` sessions**, equal to
+**`r percent(ai_assistant$session_share, 0.01)` of all sessions**. GA4 uses this
+channel when a recognised assistant such as ChatGPT, Gemini, DeepSeek, Copilot
+or Grok refers the visit. At this volume, its engagement rate is descriptive but
+not stable enough for strong performance conclusions.
+
+Growth depends mainly on making STAV content easy for assistants to discover,
+understand and cite: publish clear authoritative answers, use descriptive page
+titles and headings, keep important information in crawlable HTML, maintain
+accurate event and resource pages, add relevant structured data, and earn links
+and mentions from trusted education organisations. Source/medium and landing-page
+detail should be exported so future reports can identify which assistants and
+which cited pages actually generate visits.
+
+```{r}
+traffic |>
+  mutate(channel = fct_reorder(channel, sessions)) |>
+  ggplot(aes(channel, sessions, fill = engagement_rate)) +
+  geom_col() + coord_flip() + scale_y_continuous(labels = comma) +
+  scale_fill_gradient(low = "#BFD7EA", high = "#005A8D", labels = percent) +
+  labs(title = "Direct and Organic Search dominate reported sessions",
+    subtitle = "Fill colour represents engagement rate", x = NULL,
+    y = "Sessions", fill = "Engagement rate") + theme_minimal()
+```
+
+# Which pages people entered and viewed
+
+## Science Talent Search and the homepage are the main entry points
+
+```{r}
+landing |>
+  arrange(desc(sessions)) |>
+  transmute(
+    landing_page = landing_page_standardised,
+    sessions = comma(sessions),
+    active_users = comma(active_users),
+    new_users = comma(new_users),
+    `average engagement seconds per session` = number(
+      average_engagement_time_per_session, 0.1
+    )
+  ) |>
+  slice_head(n = 12) |>
+  knitr::kable(
+    caption = "Top landing pages: the first page of each session",
+    align = c("l", "r", "r", "r", "r")
+  )
+```
+
+The first table ranks the pages where sessions began. The next table answers a
+different question: which pages received the most views at any point in a
+session. A page can be highly viewed without being a leading landing page.
+
+```{r}
+pages |>
+  filter(page_path_standardised != "(not set)") |>
+  arrange(desc(views)) |>
+  transmute(page = page_path_standardised, views = comma(views),
+    active_users = comma(active_users),
+    views_per_active_user = number(views_per_active_user, 0.01),
+    `average engagement seconds per active user` = number(
+      average_engagement_time_per_active_user, 0.1
+    )) |>
+  slice_head(n = 12) |>
+  knitr::kable(
+    caption = "Top content pages: views occurring anywhere in a session",
+    align = c("l", "r", "r", "r", "r")
+  )
+```
+
+`/science-talent-search` was the leading landing page with
+**`r comma(landing$sessions[landing$landing_page_standardised == '/science-talent-search'][1])`
+sessions**. The homepage followed with
+**`r comma(landing$sessions[landing$landing_page_standardised == '/'][1])`
+sessions**. Leading content also includes `/my-account`, `/sts-resources`, event
+pages and trial-exam content, showing demand across public programmes,
+professional resources and member-related activity.
+
+High traffic shows content demand, not business success. Because Key Events are
+zero, these tables cannot show whether visits resulted in registrations,
+purchases or membership actions.
+
+## Why unidentified landing pages matter
+
+```{r}
+landing_status <- landing |>
+  mutate(status = if_else(landing_page_original == "(not set)",
+    "Landing page not identified", "Landing page identified")) |>
+  group_by(status) |>
+  summarise(
+    average_engagement_seconds_per_session = weighted.mean(
+      average_engagement_time_per_session, sessions
+    ),
+    sessions = sum(sessions),
+    active_users_across_rows = sum(active_users),
+    new_users_across_rows = sum(new_users),
+    .groups = "drop"
+  ) |>
+  mutate(
+    share_of_landing_page_sessions = sessions / sum(sessions),
+    sessions = comma(sessions),
+    share_of_landing_page_sessions = percent(
+      share_of_landing_page_sessions, 0.1
+    ),
+    active_users_across_rows = comma(active_users_across_rows),
+    new_users_across_rows = comma(new_users_across_rows),
+    average_engagement_seconds_per_session = number(
+      average_engagement_seconds_per_session, 0.1
+    )
+  )
+
+knitr::kable(
+  landing_status,
+  caption = "Identified versus unidentified landing-page sessions"
+)
+```
+
+GA4 assigned **`r comma(not_set_sessions)` sessions
+(`r percent(not_set_share, 0.1)`)** to `(not set)`. This means GA4 recorded the
+visit but could not determine its first page. Average engagement time for this
+group was only **`r number(landing$average_engagement_time_per_session[
+landing$landing_page_original == '(not set)'][1], 0.1)` seconds**. Consent-mode
+behaviour, session tracking and redirects are possible causes to investigate;
+the table does not identify which cause applies.
+
+The acquisition and landing-page exports differ by **`r comma(session_difference)`
+sessions (`r percent(abs(session_difference / total_sessions), 0.1)`)**. The
+aggregate results remain useful, but the difference should be treated as a
+reporting limitation.
+
+The practical consequence is that landing-page analysis is incomplete:
+
+- `r percent(not_set_share, 0.1)` of landing-page sessions cannot be assigned to
+  a specific first page;
+- the visible landing-page ranking omits those sessions and may understate some
+  real entry pages;
+- the report cannot determine which content or campaign generated those visits;
+- the very short engagement time for this group may affect overall engagement
+  interpretation.
+
+This is a measurement limitation, not evidence that `(not set)` caused visitors
+to engage less.
+
+Active-user and new-user values in the identified group are sums across landing
+page rows and may contain the same user more than once. They are included for
+context, not as a site-wide unique-user total.
+
+## Why the account pages are grouped
+
+**Purpose in this report:** prevent hundreds of ID-specific account URLs from
+creating a misleading page ranking. This is a reporting treatment, not a finding
+that `/my-account` performs well or poorly.
+
+Many `/my-account` URLs contain a different order number, membership ID,
+subscription ID, group ID or joining token. GA4 therefore treats URLs such as
+`/my-account/view-order/123` and `/my-account/view-order/456` as separate rows,
+even though both represent the same **View order** function. Reporting every ID
+separately would make the table long, fragment the activity of one function and
+provide little value to a non-technical reader.
+
+Preparation found **`r comma(templated_rows)` original URL rows** of this type
+and grouped them into **`r n_distinct(pages$page_path_template[
+pages$page_path_was_templated])` functional page groups**. Original URLs remain
+available in the clean data; the summary shows the grouped functions so readers
+can understand account activity without reading hundreds of ID-specific rows.
+
+```{r}
+dynamic_path_overview <- tibble(
+  measure = c(
+    "Original URL rows containing an ID or token",
+    "Different original account URLs",
+    "Functional page groups shown in the report",
+    "Views across those original URLs"
+  ),
+  result = comma(c(
+    templated_rows,
+    n_distinct(pages$page_path_original[pages$page_path_was_templated]),
+    n_distinct(pages$page_path_template[pages$page_path_was_templated]),
+    sum(pages$views[pages$page_path_was_templated])
+  ))
+)
+knitr::kable(
+  dynamic_path_overview,
+  caption = "Why hundreds of account URLs become a short summary",
+  align = c("l", "r")
+)
+```
+
+```{r}
+pages |>
+  filter(page_path_was_templated) |>
+  group_by(page_path_template) |>
+  summarise(
+    original_path_rows = n(),
+    views = sum(views),
+    events = sum(event_count),
+    .groups = "drop"
+  ) |>
+  arrange(desc(views)) |>
+  mutate(views = comma(views), events = comma(events)) |>
+  slice_head(n = 15) |>
+  knitr::kable(
+    caption = "Account activity grouped by page function",
+    align = c("l", "r", "r", "r")
+  )
+```
+
+Active users are deliberately not summed in this table because the same user
+may visit more than one original dynamic path.
+
+## Pages to investigate, not pages judged as poor
+
+**`r comma(nrow(review_pages))` pages** met the screening rule of at least 100
+views and under 10 seconds average engagement time per active user. These may be
+redirects, utility pages, tracking gaps, automated traffic or genuine content
+problems; they are review candidates, not automatic failures.
+
+The rule narrows thousands of page rows to a manageable review list. It does not
+score page quality. A login page, redirect or file URL may legitimately require
+very little engagement time, while a long article with the same result may need
+content or tracking investigation.
+
+```{r}
+review_pages |>
+  transmute(page = page_path_standardised, views = comma(views),
+    active_users = comma(active_users),
+    `average engagement seconds per active user` = number(
+      average_engagement_time_per_active_user, 0.1
+    )) |>
+  slice_head(n = 15) |>
+  knitr::kable(
+    caption = "Pages meeting the high-view, low-engagement screening rule",
+    align = c("l", "r", "r", "r")
+  )
+```
+
+# What visitors did and whether outcomes were tracked
+
+::: {.callout-important title="Main message: activity is visible, business outcomes are not"}
+GA4 records page views, scrolling, clicks, downloads and form interactions, but
+all four supplied reports show **`r comma(reported_key_events)` Key Events**.
+Therefore, this report can describe what visitors did on the website but cannot
+show how many completed a registration, membership action or purchase. Zero here
+means **not measurable in these exports**, not necessarily zero real outcomes.
+:::
+
+```{r}
+knitr::kable(
+  key_event_reconciliation |>
+    mutate(key_events = comma(key_events)),
+  caption = "Checking whether all GA4 reports agree on Key Events",
+  align = c("l", "r")
+)
+```
+
+The export contains **`r comma(page_view$event_count)` page views**,
+**`r comma(events$event_count[events$event_name == 'scroll'])` scrolls**,
+**`r comma(events$event_count[events$event_name == 'click'])` clicks** and
+**`r comma(events$event_count[events$event_name == 'file_download'])` file
+downloads**. Under standard GA4 Enhanced Measurement, `scroll` fires only the
+first time 90% vertical depth becomes visible on each page—not every time a user
+moves the scroll wheel. The observed scroll count is approximately
+**`r percent(scroll_to_view_ratio, 0.1)` of page views**. This is not a true
+reader-completion rate because page length, automatic visibility, consent and
+implementation can affect the event, but it explains why scroll events are
+substantially fewer than page views.
+
+The export also contains **`r comma(events$event_count[events$event_name ==
+'form_start'])` form starts** and **`r comma(events$event_count[events$event_name
+== 'form_submit'])` form submissions**.
+
+These form names suggest intent but do not identify the form or business
+outcome. More importantly, supplied Key Events total **`r reported_key_events`**.
+Conversion rates by channel, landing page and content page are therefore not
+available. STAV should agree the outcomes that matter—such as completed event
+registration, membership application or renewal, resource purchase and contact
+enquiry—then configure and test them as Key Events. Stable `form_name` or
+`form_id` parameters should distinguish generic form events.
+
+```{r}
+events |>
+  arrange(desc(event_count)) |>
+  transmute(event_name, category = event_category,
+    event_count = comma(event_count), users = comma(total_users),
+    events_per_active_user = number(event_count_per_active_user, 0.01)) |>
+  knitr::kable(align = c("l", "l", "r", "r", "r"))
+```
+
+# Countries that need a closer look
+
+**`r nrow(flagged_countries)` high-volume country rows** meet the review rule:
+at least 500 active users and either engagement below 15% or average engagement
+time below 10 seconds. These flags are not proof of automated or irrelevant
+traffic. Country-level users can also overlap. Hostname, source, medium,
+landing-page and device evidence is required before filtering decisions.
+
+The rule is an analyst-created screening tool, not a Google threshold. The
+500-user minimum prevents tiny country rows from being flagged because of a few
+short visits. The engagement thresholds identify rows that are both large
+enough to affect overall results and unusually weak on at least one engagement
+measure. A flag means **investigate**, not **exclude**.
+
+```{r}
+review_rule <- tribble(
+  ~component, ~condition, ~purpose,
+  "Volume gate", "Active users >= 500",
+    "Focus review on country rows large enough to affect the analysis",
+  "Engagement signal 1", "Engagement rate < 15%",
+    "Identify country rows where few sessions qualify as engaged",
+  "Engagement signal 2", "Average engagement time/user < 10 seconds",
+    "Identify country rows with very short measured attention",
+  "Final flag", "Volume gate AND either engagement signal",
+    "Create a review queue; do not delete or classify traffic automatically"
+)
+knitr::kable(review_rule, caption = "How the geographic review rule works")
+```
+
+```{r}
+flagged_countries |>
+  transmute(country, active_users = comma(active_users), new_users = comma(new_users),
+    engagement_rate = percent(engagement_rate, 0.1),
+    `average engagement seconds per active user` = number(
+      average_engagement_time_per_active_user, 0.1
+    ),
+    events = comma(event_count)) |>
+  knitr::kable(align = c("l", "r", "r", "r", "r", "r"))
+```
+
+# What this report can and cannot answer
+
+```{r}
+coverage <- tribble(
+  ~question, ~status, ~reason,
+  "How much aggregate traffic and content activity occurred?", "Supported",
+    "Sessions, views and events cover the full period",
+  "Which default channels and pages received the most activity?", "Supported",
+    "Channel, landing-page and page-path dimensions are supplied",
+  "How did traffic change by month?", "Not supported", "No date/month dimension",
+  "Which source, medium or campaign drove results?", "Not supported",
+    "Only default channel group is present",
+  "How do New and Returning users compare?", "Not supported",
+    "No explicit Returning-user dimension",
+  "Which channels or pages generated conversions?", "Not supported",
+    "All supplied Key Event totals are zero",
+  "Where do users exit or navigate next?", "Not supported",
+    "Navigation-path and exit dimensions are absent"
+)
+knitr::kable(coverage, align = c("l", "l", "l"))
+```
+
+# Scope boundary
+
+The pipeline changes only analysis-layer files. Raw exports remain unchanged.
+Tracking changes and traffic filters require implementation and validation by
+STAV's authorised administrators.
