@@ -159,3 +159,184 @@ Some GA4 metrics require careful interpretation. In particular, Active Users can
 
 The analysis identifies patterns in the available data, but does not assume that a particular STAV activity caused an increase or decrease in website traffic unless supporting evidence is available.
 
+# Website Traffic and Acquisition
+
+## Overall Traffic Trend
+
+```{r}
+#| label: fig-monthly-traffic
+#| fig-cap: "STAV website traffic by month, July 2025 to June 2026"
+#| fig-width: 9
+#| fig-height: 5
+
+monthly_total <- monthly %>%
+  mutate(
+    month_num = as.integer(month),
+    year = if_else(month_num >= 7, 2025L, 2026L),
+    date = ymd(sprintf("%d-%02d-01", year, month_num))
+  ) %>%
+  group_by(date) %>%
+  summarise(
+    sessions = sum(sessions, na.rm = TRUE),
+    .groups = "drop"
+  )
+
+ggplot(
+  monthly_total,
+  aes(x = date, y = sessions)
+) +
+  geom_line(linewidth = 1) +
+  geom_point(size = 2.5) +
+  
+  # Show session values
+  geom_text(
+    aes(label = scales::comma(sessions)),
+    vjust = -0.8,
+    size = 3.5
+  ) +
+  
+  scale_x_date(
+    date_breaks = "1 month",
+    date_labels = "%b\n%Y"
+  ) +
+  scale_y_continuous(
+    labels = scales::comma,
+    expand = expansion(mult = c(0.05, 0.15))
+  ) +
+  labs(
+    title = "Website Traffic by Month",
+    subtitle = "STAV, July 2025 – June 2026",
+    x = NULL,
+    y = "Website sessions"
+  ) +
+  theme_minimal()
+```
+
+*In GA4, a session represents a period in which a user interacts with the website. One person may generate multiple sessions if they return to the website at different times.*
+
+**What this means for STAV:** Website activity changed substantially throughout the year. Traffic was lowest in September 2025, increased strongly in October, and was generally higher between February and June 2026, reaching its highest level in May.
+
+These changes may reflect the timing of STAV activities, events, registrations, resource releases or other communications that encouraged people to visit the website. Lower-traffic periods may similarly reflect periods with fewer time-sensitive activities or lower demand for website content. However, the available GA4 data does not identify the specific cause of these monthly changes, so these factors should be treated as possible explanations rather than confirmed causes.
+
+## Acquisition Channels
+
+Website traffic was dominated by two acquisition channels: **Direct** and **Organic Search**. Direct generated 46,708 sessions (approximately 50.6% of annual channel sessions), while Organic Search generated 40,092 sessions (43.5%). Referral traffic contributed a further 4,190 sessions (4.5%), while all other channels represented only a small proportion of recorded traffic.
+
+```{r}
+#| label: fig-acquisition-channels
+#| fig-cap: "How visitors reached the STAV website"
+#| fig-width: 9
+#| fig-height: 5
+
+channel_summary <- channels %>%
+  mutate(
+    session_share = sessions / sum(sessions)
+  ) %>%
+  arrange(sessions)
+
+ggplot(
+  channel_summary,
+  aes(
+    x = reorder(
+      session_primary_channel_group_default_channel_group,
+      sessions
+    ),
+    y = sessions
+  )
+) +
+  geom_col() +
+  geom_text(
+    aes(
+      label = paste0(
+        scales::comma(sessions),
+        " (",
+        scales::percent(session_share, accuracy = 0.1),
+        ")"
+      )
+    ),
+    hjust = -0.1,
+    size = 3.5
+  ) +
+  coord_flip() +
+  scale_y_continuous(
+    labels = scales::comma,
+    expand = expansion(mult = c(0, 0.25))
+  ) +
+  labs(
+    title = "How Visitors Reached the STAV Website",
+    subtitle = "STAV, July 2025 – June 2026",
+    x = NULL,
+    y = "Website sessions"
+  ) +
+  theme_minimal()
+```
+
+**How to read this chart:**\
+**Direct** means GA4 could not identify another referring source for the session. **Organic Search** means visitors arrived through unpaid search-engine results, such as Google or Bing. **Referral** means visitors arrived by following a link from another website.
+
+**What this means for STAV:** Direct and Organic Search dominated website acquisition. Direct generated 46,708 sessions (50.6%), while Organic Search generated 40,092 sessions (43.5%). Together, they accounted for approximately 94% of annual channel sessions.
+
+Organic Search also showed stronger engagement signals. Its engagement rate was 59.3%, compared with 29.2% for Direct traffic. This means Organic Search sessions were more frequently classified by GA4 as engaged sessions; it does not necessarily mean these visitors were more valuable to STAV.
+
+## Traffic Sources
+
+The Source / Medium report provides a more detailed view of where website traffic came from. While the previous chart groups traffic into broad channels, this analysis identifies the specific sources within those channels.
+
+```{r}
+#| label: fig-top-traffic-sources
+#| fig-cap: "Top three traffic sources to the STAV website"
+#| fig-width: 9
+#| fig-height: 4.5
+
+source_medium_total <- sum(source_medium$sessions)
+
+top_sources <- source_medium %>%
+  filter(session_source_medium != "(not set)") %>%
+  mutate(
+    session_share = sessions / source_medium_total
+  ) %>%
+  slice_max(
+    order_by = sessions,
+    n = 3,
+    with_ties = FALSE
+  )
+
+ggplot(
+  top_sources,
+  aes(
+    x = reorder(session_source_medium, sessions),
+    y = sessions
+  )
+) +
+  geom_col() +
+  geom_text(
+    aes(
+      label = paste0(
+        scales::comma(sessions),
+        " (",
+        scales::percent(session_share, accuracy = 0.1),
+        ")"
+      )
+    ),
+    hjust = -0.1,
+    size = 4
+  ) +
+  coord_flip() +
+  scale_y_continuous(
+    labels = scales::comma,
+    expand = expansion(mult = c(0, 0.25))
+  ) +
+  labs(
+    title = "Top Three Traffic Sources",
+    subtitle = "STAV, July 2025 – June 2026",
+    x = NULL,
+    y = "Website sessions"
+  ) +
+  theme_minimal()
+```
+
+**What does "(direct) / (none)" mean?**\
+In GA4, "(direct) / (none)" means that GA4 did not identify another source or medium for the session. This can include users who accessed the website directly, such as through a bookmark or by entering the website address, but it can also include visits where referral information was unavailable. It should therefore not be interpreted as only users manually typing the STAV website address.
+
+**What this means for STAV:** The previous chart showed that Organic Search was one of STAV's two dominant acquisition channels. Looking more closely at the underlying sources shows that most of this search traffic came from Google (35,636 sessions) and Bing (3,805 sessions). Together with Direct traffic, these three sources accounted for approximately 93.6% of source-level sessions.
+
