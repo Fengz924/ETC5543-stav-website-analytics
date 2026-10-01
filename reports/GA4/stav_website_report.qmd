@@ -1197,3 +1197,103 @@ China and Singapore each represented approximately 11% of country-level Active U
 
 Vietnam recorded a high engagement rate, but its much smaller user volume means this result should be interpreted cautiously.
 
+# User Behaviour
+
+GA4 also records interactions that occur while visitors use the website. These events provide additional information about how users interact with STAV's content and website functions beyond simply viewing pages.
+
+The analysis focuses on tracked behaviour events such as scrolling, clicks, form activity, file downloads, video interactions and internal search.
+
+```{r}
+#| label: fig-user-behaviour
+#| fig-cap: "Tracked user behaviour events on the STAV website"
+#| fig-width: 9
+#| fig-height: 6
+
+overall_active_users <- 55599
+
+# Select behaviour-related events
+behaviour_events <- events %>%
+  filter(
+    event_name %in% c(
+      "scroll",
+      "form_start",
+      "click",
+      "form_submit",
+      "file_download",
+      "video_start",
+      "video_progress",
+      "video_complete",
+      "view_search_results"
+    )
+  ) %>%
+  mutate(
+    user_percentage = total_users / overall_active_users
+  )
+
+# Create chart
+ggplot(
+  behaviour_events,
+  aes(
+    x = reorder(event_name, event_count),
+    y = event_count
+  )
+) +
+  geom_col() +
+
+  # Event count inside longer bars
+  geom_text(
+    data = behaviour_events %>% filter(event_count >= 5000),
+    aes(label = scales::comma(event_count)),
+    hjust = 1.15,
+    size = 3.8
+  ) +
+
+  # Event count outside shorter bars
+  geom_text(
+    data = behaviour_events %>% filter(event_count < 5000),
+    aes(label = scales::comma(event_count)),
+    hjust = -0.15,
+    size = 3.8
+  ) +
+
+  # Number of users and percentage
+  geom_text(
+    aes(
+      y = 68000,
+      label = paste0(
+        scales::comma(total_users),
+        " users | ",
+        scales::percent(user_percentage, accuracy = 0.1)
+      )
+    ),
+    hjust = 0,
+    size = 3.4
+  ) +
+
+  coord_flip() +
+
+  scale_y_continuous(
+    labels = scales::comma,
+    limits = c(0, 100000),
+    expand = expansion(mult = c(0, 0))
+  ) +
+
+  labs(
+    title = "Tracked User Behaviour Events",
+    subtitle = "Event volume and users who triggered each event",
+    x = NULL,
+    y = "Number of events"
+  ) +
+
+  theme_minimal()
+```
+
+**How to read this chart:**\
+An event is recorded when a tracked interaction occurs on the website. Event counts represent the number of times an interaction was recorded, not the number of individual users. The same user may generate the same event multiple times.
+
+**What this means for STAV:** Users interacted with the website beyond simply viewing pages. GA4 recorded 60,220 scroll events, 20,562 form-start events, 17,027 click events, 11,890 form-submit events and 9,756 file-download events during the reporting period.
+
+These results show substantial use of website content and functions. However, through the currently available GA4 reporting, it is not possible to identify the specific forms or files associated with these events. As a result, the analysis cannot directly determine which STAV services, resources or activities generated these interactions.
+
+
+
