@@ -258,3 +258,66 @@ total_difference_pct
 # https://support.google.com/analytics/answer/13331292
 
 
+# ============================================================
+# 4. MONTHLY WEBSITE TRAFFIC ANALYSIS
+# ============================================================
+
+
+# ------------------------------------------------------------
+# 4.1 Calculate total sessions by month
+# ------------------------------------------------------------
+
+monthly_total <- monthly %>%
+  group_by(date) %>%
+  summarise(
+    sessions = sum(sessions),
+    engaged_sessions = sum(engaged_sessions),
+    .groups = "drop"
+  ) %>%
+  arrange(date)
+
+monthly_total
+
+# Rank months by total sessions
+monthly_total %>%
+  arrange(desc(sessions))
+
+
+# ------------------------------------------------------------
+# 4.2 Visualise monthly website sessions
+# ------------------------------------------------------------
+
+ggplot(
+  monthly_total,
+  aes(x = date, y = sessions)
+) +
+  geom_line(linewidth = 1) +
+  geom_point(size = 2) +
+  scale_x_date(
+    date_breaks = "1 month",
+    date_labels = "%b\n%Y"
+  ) +
+  scale_y_continuous(
+    labels = scales::comma
+  ) +
+  labs(
+    title = "Monthly Website Sessions",
+    subtitle = "STAV, July 2025 – June 2026",
+    x = NULL,
+    y = "Sessions"
+  ) +
+  theme_minimal()
+
+
+# Key observations:
+# - Sessions declined from 7,290 in July 2025 to 3,494 in
+#   September 2025.
+# - Traffic recovered strongly in October 2025 to 8,729 sessions.
+# - Traffic increased again from January to February 2026.
+# - May 2026 recorded the highest monthly total at 10,559 sessions.
+#
+# These patterns describe changes in traffic only.
+# They should not be attributed to specific STAV campaigns or events
+# without additional evidence.
+
+
