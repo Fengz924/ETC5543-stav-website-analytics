@@ -1,0 +1,1411 @@
+---
+title: "STAV Website Analytics Report"
+subtitle: "Google Analytics 4 Analysis"
+author: "Feng Zhu"
+date: "2026-09-30"
+
+format:
+  html:
+    toc: true
+    toc-depth: 2
+    number-sections: true
+    embed-resources: true
+
+execute:
+  echo: false
+  warning: false
+  message: false
+
+editor: visual
+---
+
+```{r}
+#| label: setup
+#| include: false
+
+library(tidyverse)
+library(janitor)
+library(lubridate)
+```
+
+```{r}
+#| label: load-data
+#| include: false
+
+monthly <- read_csv(
+  "../data/GA4/traffic_channel_monthly_20250701_20260630.csv",
+  skip = 9,
+  show_col_types = FALSE
+) %>%
+  clean_names()
+
+channels <- read_csv(
+  "../data/GA4/traffic_channel_20250701_20260630.csv",
+  skip = 9,
+  show_col_types = FALSE
+) %>%
+  clean_names()
+
+source_medium <- read_csv(
+  "../data/GA4/traffic_source_medium_20250701_20260630.csv",
+  skip = 9,
+  show_col_types = FALSE
+) %>%
+  clean_names()
+
+landing <- read_csv(
+  "../data/GA4/landing_page_20250701_20260630.csv",
+  skip = 9,
+  show_col_types = FALSE
+) %>%
+  clean_names()
+
+pages <- read_csv(
+  "../data/GA4/pages_screens_page_path_20250701_20260630.csv",
+  skip = 9,
+  show_col_types = FALSE
+) %>%
+  clean_names()
+
+monthly_pages <- read_csv(
+  "../data/GA4/pages_screens_page_path_month_20250701_20260630.csv",
+  skip = 9,
+  show_col_types = FALSE
+) %>%
+  clean_names()
+
+device <- read_csv(
+  "../data/GA4/device_category_20250701_20260630.csv",
+  skip = 9,
+  show_col_types = FALSE
+) %>%
+  clean_names()
+
+country <- read_csv(
+  "../data/GA4/country_20250701_20260630.csv",
+  skip = 9,
+  show_col_types = FALSE
+) %>%
+  clean_names()
+
+events <- read_csv(
+  "../data/GA4/events_20250701_20260630.csv",
+  skip = 9,
+  show_col_types = FALSE
+) %>%
+  clean_names()
+```
+
+# Executive Summary
+
+This report analyses STAV website activity using Google Analytics 4 (GA4) data for the period from 1 July 2025 to 30 June 2026. The analysis examines how users reached the website, which content attracted the most activity, the devices and geographic locations associated with website use, and the interactions recorded across the site.
+
+The analysis identified six key findings:
+
+1.  **Most website traffic came from Direct and Organic Search.** Direct accounted for approximately 50.6% of sessions, while Organic Search accounted for 43.5%. Together, these two channels generated around 94% of website sessions. Organic Search also recorded a higher engagement rate (59.3%) than Direct traffic (29.2%), showing that a larger proportion of search sessions met GA4's engagement criteria.
+
+2.  **Science Talent Search (STS) was a central component of website activity.** Science Talent Search content accounted for approximately 31.7% of landing-page sessions and 35.3% of all page views. This means it was important both as a way for visitors to enter the website and as content they viewed while using the site, making it a key area for STAV to maintain and monitor.
+
+3.  **Website attention was concentrated around a relatively small proportion of content.** Website activity was concentrated on a relatively small number of pages. The website has many different pages, but the 100 most-viewed pages generated approximately 87.2% of all page views. This means STAV can focus more attention on maintaining its most frequently viewed pages rather than reviewing every page equally.
+
+4.  **Website usage was strongly desktop-oriented, while mobile users still showed meaningful engagement.** Desktop represented approximately 83.4% of device-level Active Users, compared with 15.9% for mobile. However, mobile recorded a higher engagement rate of 50.4%, compared with 42.0% for desktop. This suggests that mobile remains an important part of the website experience despite its smaller user volume.
+
+5.  **Meaningful website activity was strongly concentrated in Australia.** Australia represented 64.9% of country-level Active Users and generated 85.5% of recorded events. Several international locations recorded relatively high user counts but substantially weaker engagement signals.
+
+6.  **Visitors interacted with the website in several ways beyond simply viewing pages.** GA4 recorded substantial activity including scrolling, form interactions, clicks and file downloads. However, the current tracking does not provide enough detail to identify which specific forms, files or resources generated these interactions. This limits STAV's ability to understand which website activities are most important to users.
+
+Based on these findings, the report recommends prioritising high-demand content such as Science Talent Search, maintaining STAV's Organic Search visibility, regularly testing important mobile website tasks, improving the detail captured for forms and file downloads, and tracking the website actions that matter most to STAV.
+
+# Project Objective and Scope
+
+The purpose of this analysis is to help STAV understand how people use its website, where website traffic comes from, which content receives the most attention, and how website measurement could be improved in the future.
+
+The analysis focuses on website activity recorded in Google Analytics 4 (GA4) between **1 July 2025 and 30 June 2026**. It examines overall traffic patterns, acquisition channels and sources, landing pages, website content, device usage, geographic distribution and tracked user behaviour.
+
+The analysis addresses four main questions:
+
+1.  How do users reach the STAV website, and how does website traffic change over time?
+2.  Which website content and entry points attract the most activity?
+3.  What do the available device and geographic data indicate about the website audience?
+4.  What user interactions are currently captured by GA4, and where are there opportunities to improve measurement?
+
+This report focuses specifically on the **GA4 website analytics component** of the internship project.
+
+The analysis is intended to support practical decision-making rather than evaluate website performance against an external benchmark. Findings are therefore interpreted using patterns observed within STAV's own GA4 data.
+
+# Methodology
+
+## Data Source
+
+Website analytics data were obtained from STAV's Google Analytics 4 (GA4) property. The reporting period was **1 July 2025 to 30 June 2026**, providing a full year of website activity for analysis.
+
+Separate GA4 reports were exported for traffic acquisition, monthly traffic trends, source/medium, landing pages, pages and screens, device categories, countries and events. These exports provided different views of website acquisition, content usage, audience characteristics and tracked user interactions.
+
+## Data Preparation
+
+The exported GA4 data were cleaned and analysed in R. The data were checked for missing values, duplicate records and inconsistencies before analysis. Monthly data were organised chronologically from July 2025 to June 2026. GA4 report totals were also compared with the exported data as a quality check. Where small differences occurred between reports, the original GA4 values were retained rather than manually adjusted.
+
+## Content Classification
+
+To make the website data easier to understand, individual pages were grouped into broader content categories such as Science Talent Search, Events & Conferences, Resources & Publications, Shop, Membership and Account.
+
+These categories were created specifically for this analysis and are not standard GA4 categories. The original page-level data were retained so that the classifications could be checked where needed.
+
+## Analysis Approach
+
+The analysis examined website traffic over time, how visitors reached the website, which content they viewed, the devices and countries associated with website activity, and the interactions recorded by GA4.
+
+Some GA4 metrics require careful interpretation. In particular, Active Users cannot simply be added across pages, devices or countries, because the same person may appear in more than one row. For example, someone who visits both the homepage and a Science Talent Search page may be counted as an Active User for both pages. Therefore, the GA4 report-level total of 55,599 Active Users is used when describing the overall website audience.
+
+The analysis identifies patterns in the available data, but does not assume that a particular STAV activity caused an increase or decrease in website traffic unless supporting evidence is available.
+
+# Website Traffic and Acquisition
+
+## Overall Traffic Trend
+
+```{r}
+#| label: fig-monthly-traffic
+#| fig-cap: "STAV website traffic by month, July 2025 to June 2026"
+#| fig-width: 9
+#| fig-height: 5
+
+monthly_total <- monthly %>%
+  mutate(
+    month_num = as.integer(month),
+    year = if_else(month_num >= 7, 2025L, 2026L),
+    date = ymd(sprintf("%d-%02d-01", year, month_num))
+  ) %>%
+  group_by(date) %>%
+  summarise(
+    sessions = sum(sessions, na.rm = TRUE),
+    .groups = "drop"
+  )
+
+ggplot(
+  monthly_total,
+  aes(x = date, y = sessions)
+) +
+  geom_line(linewidth = 1) +
+  geom_point(size = 2.5) +
+  
+  # Show session values
+  geom_text(
+    aes(label = scales::comma(sessions)),
+    vjust = -0.8,
+    size = 3.5
+  ) +
+  
+  scale_x_date(
+    date_breaks = "1 month",
+    date_labels = "%b\n%Y"
+  ) +
+  scale_y_continuous(
+    labels = scales::comma,
+    expand = expansion(mult = c(0.05, 0.15))
+  ) +
+  labs(
+    title = "Website Traffic by Month",
+    subtitle = "STAV, July 2025 – June 2026",
+    x = NULL,
+    y = "Website sessions"
+  ) +
+  theme_minimal()
+```
+
+*In GA4, a session represents a period in which a user interacts with the website. One person may generate multiple sessions if they return to the website at different times.*
+
+**What this means for STAV:** Website activity changed substantially throughout the year. Traffic was lowest in September 2025, increased strongly in October, and was generally higher between February and June 2026, reaching its highest level in May.
+
+These changes may reflect the timing of STAV activities, events, registrations, resource releases or other communications that encouraged people to visit the website. Lower-traffic periods may similarly reflect periods with fewer time-sensitive activities or lower demand for website content. However, the available GA4 data does not identify the specific cause of these monthly changes, so these factors should be treated as possible explanations rather than confirmed causes.
+
+## Acquisition Channels
+
+Website traffic was dominated by two acquisition channels: **Direct** and **Organic Search**. Direct generated 46,708 sessions (approximately 50.6% of annual channel sessions), while Organic Search generated 40,092 sessions (43.5%). Referral traffic contributed a further 4,190 sessions (4.5%), while all other channels represented only a small proportion of recorded traffic.
+
+```{r}
+#| label: fig-acquisition-channels
+#| fig-cap: "How visitors reached the STAV website"
+#| fig-width: 9
+#| fig-height: 5
+
+channel_summary <- channels %>%
+  mutate(
+    session_share = sessions / sum(sessions)
+  ) %>%
+  arrange(sessions)
+
+ggplot(
+  channel_summary,
+  aes(
+    x = reorder(
+      session_primary_channel_group_default_channel_group,
+      sessions
+    ),
+    y = sessions
+  )
+) +
+  geom_col() +
+  geom_text(
+    aes(
+      label = paste0(
+        scales::comma(sessions),
+        " (",
+        scales::percent(session_share, accuracy = 0.1),
+        ")"
+      )
+    ),
+    hjust = -0.1,
+    size = 3.5
+  ) +
+  coord_flip() +
+  scale_y_continuous(
+    labels = scales::comma,
+    expand = expansion(mult = c(0, 0.25))
+  ) +
+  labs(
+    title = "How Visitors Reached the STAV Website",
+    subtitle = "STAV, July 2025 – June 2026",
+    x = NULL,
+    y = "Website sessions"
+  ) +
+  theme_minimal()
+```
+
+**How to read this chart:**\
+**Direct** means GA4 could not identify another referring source for the session. **Organic Search** means visitors arrived through unpaid search-engine results, such as Google or Bing. **Referral** means visitors arrived by following a link from another website.
+
+**What this means for STAV:** Direct and Organic Search dominated website acquisition. Direct generated 46,708 sessions (50.6%), while Organic Search generated 40,092 sessions (43.5%). Together, they accounted for approximately 94% of annual channel sessions.
+
+Organic Search also showed stronger engagement signals. Its engagement rate was 59.3%, compared with 29.2% for Direct traffic. This means Organic Search sessions were more frequently classified by GA4 as engaged sessions; it does not necessarily mean these visitors were more valuable to STAV.
+
+## Traffic Sources
+
+The Source / Medium report provides a more detailed view of where website traffic came from. While the previous chart groups traffic into broad channels, this analysis identifies the specific sources within those channels.
+
+```{r}
+#| label: fig-top-traffic-sources
+#| fig-cap: "Top three traffic sources to the STAV website"
+#| fig-width: 9
+#| fig-height: 4.5
+
+source_medium_total <- sum(source_medium$sessions)
+
+top_sources <- source_medium %>%
+  filter(session_source_medium != "(not set)") %>%
+  mutate(
+    session_share = sessions / source_medium_total
+  ) %>%
+  slice_max(
+    order_by = sessions,
+    n = 3,
+    with_ties = FALSE
+  )
+
+ggplot(
+  top_sources,
+  aes(
+    x = reorder(session_source_medium, sessions),
+    y = sessions
+  )
+) +
+  geom_col() +
+  geom_text(
+    aes(
+      label = paste0(
+        scales::comma(sessions),
+        " (",
+        scales::percent(session_share, accuracy = 0.1),
+        ")"
+      )
+    ),
+    hjust = -0.1,
+    size = 4
+  ) +
+  coord_flip() +
+  scale_y_continuous(
+    labels = scales::comma,
+    expand = expansion(mult = c(0, 0.25))
+  ) +
+  labs(
+    title = "Top Three Traffic Sources",
+    subtitle = "STAV, July 2025 – June 2026",
+    x = NULL,
+    y = "Website sessions"
+  ) +
+  theme_minimal()
+```
+
+**What does "(direct) / (none)" mean?**\
+In GA4, "(direct) / (none)" means that GA4 did not identify another source or medium for the session. This can include users who accessed the website directly, such as through a bookmark or by entering the website address, but it can also include visits where referral information was unavailable. It should therefore not be interpreted as only users manually typing the STAV website address.
+
+**What this means for STAV:** The previous chart showed that Organic Search was one of STAV's two dominant acquisition channels. Looking more closely at the underlying sources shows that most of this search traffic came from Google (35,636 sessions) and Bing (3,805 sessions). Together with Direct traffic, these three sources accounted for approximately 93.6% of source-level sessions.
+
+# Website Content and Entry Points
+
+## Landing Pages
+
+A landing page is the first page a visitor sees when entering the STAV website. Analysing landing pages helps identify which areas of the website most frequently act as entry points for visitors.
+
+To make the results easier to interpret, individual landing pages were grouped into business-relevant content categories. These categories were created for this analysis and are not native GA4 categories.
+
+```{r}
+#| label: fig-landing-categories
+#| fig-cap: "Main content categories through which visitors entered the STAV website"
+#| fig-width: 9
+#| fig-height: 5.5
+
+landing_classified <- landing %>%
+  mutate(
+    landing_category = case_when(
+      landing_page == "(not set)" ~ "Not set",
+      landing_page == "/" ~ "Homepage",
+
+      str_detect(
+        landing_page,
+        "science-talent-search|^/sts-"
+      ) ~ "Science Talent Search",
+
+      str_detect(
+        landing_page,
+        "^/event/|^/events|^/events-calendar|^/workshops|conference|stavcon|call-for-abstracts|submitting-a-session|^/series/"
+      ) ~ "Events & Conferences",
+
+      str_detect(
+        landing_page,
+        "^/publications|^/resources|^/stav-publishing|labtalk|conference-resources|teaching-science-journals"
+      ) ~ "Resources & Publications",
+
+      str_detect(
+        landing_page,
+        "science-in-construction|national-science-week"
+      ) ~ "Science Programs & Initiatives",
+
+      str_detect(
+        landing_page,
+        "^/shop|^/product|^/product-category|^/cart|^/checkout"
+      ) ~ "Shop",
+
+      str_detect(
+        landing_page,
+        "member|membership"
+      ) ~ "Membership",
+
+      str_detect(
+        landing_page,
+        "^/my-account|^/login"
+      ) ~ "Account",
+
+      str_detect(
+        landing_page,
+        "^/about-us|^/our-team|^/contact-us|^/stav-council|^/our-partners|annual-general-meeting"
+      ) ~ "Organisation",
+
+      str_detect(
+        landing_page,
+        "^/forums"
+      ) ~ "Forums / Community",
+
+      str_detect(
+        landing_page,
+        "^/wp-content/uploads/"
+      ) ~ "Files",
+
+      str_detect(
+        landing_page,
+        "^/gh"
+      ) ~ "System / Preferences",
+
+      TRUE ~ "Other"
+    )
+  )
+
+landing_report_sessions <- 91062
+
+landing_category_summary <- landing_classified %>%
+  group_by(landing_category) %>%
+  summarise(
+    sessions = sum(sessions),
+    .groups = "drop"
+  ) %>%
+  mutate(
+    session_share = sessions / landing_report_sessions
+  )
+
+landing_category_summary %>%
+  slice_max(
+    order_by = sessions,
+    n = 7,
+    with_ties = FALSE
+  ) %>%
+  ggplot(
+    aes(
+      x = reorder(landing_category, sessions),
+      y = sessions
+    )
+  ) +
+  geom_col() +
+  geom_text(
+    aes(
+      label = paste0(
+        scales::comma(sessions),
+        " (",
+        scales::percent(session_share, accuracy = 0.1),
+        ")"
+      )
+    ),
+    hjust = -0.1,
+    size = 3.5
+  ) +
+  coord_flip() +
+  scale_y_continuous(
+    labels = scales::comma,
+    expand = expansion(mult = c(0, 0.27))
+  ) +
+  labs(
+    title = "Main Website Entry Points by Content Category",
+    subtitle = "STAV, July 2025 – June 2026",
+    x = NULL,
+    y = "Landing-page sessions"
+  ) +
+  theme_minimal()
+```
+
+**How to read this chart:**\
+A landing page is the first page viewed when a visitor enters the website. "(not set)" means that GA4 did not record an identifiable landing-page value for those sessions.
+
+**What this means for STAV:** Science Talent Search was the largest website entry category, accounting for approximately 31.7% of landing-page sessions. The Homepage accounted for 17.7%, while Events & Conferences accounted for 15.6%. Together, these three areas represented approximately 65% of report-level sessions.
+
+The (not set) category accounted for 6,566 sessions (7.2%), it represents sessions for which GA4 did not assign a landing-page value. Upon further checking in GA4, page-path information could be associated with this category, with prominent paths including /science-talent-search/, /sts-resources/ and the homepage. However, these paths should not be interpreted as confirmed landing pages, as GA4 did not assign a landing-page value to these sessions.
+
+
+
+## Website Content
+
+```{r}
+#| label: fig-content-categories
+#| fig-cap: "Website views by content category"
+#| fig-width: 9
+#| fig-height: 5.5
+
+pages_classified <- pages %>%
+  mutate(
+    page_category = case_when(
+      page_path_and_screen_class == "/" ~ "Homepage",
+
+      str_detect(
+        page_path_and_screen_class,
+        "science-talent-search|^/sts-"
+      ) ~ "Science Talent Search",
+
+      str_detect(
+        page_path_and_screen_class,
+        "^/event/|^/events|^/events-calendar|^/workshops|conference|stavcon|call-for-abstracts|submitting-a-session|^/series/|^/venue/|^/organiser/"
+      ) ~ "Events & Conferences",
+
+      str_detect(
+        page_path_and_screen_class,
+        "^/publications|^/resources|^/stav-publishing|labtalk|conference-resources|teaching-science-journals|lets-find-out"
+      ) ~ "Resources & Publications",
+
+      str_detect(
+        page_path_and_screen_class,
+        "science-in-construction|national-science-week"
+      ) ~ "Science Programs & Initiatives",
+
+      str_detect(
+        page_path_and_screen_class,
+        "^/shop|^/product|^/product-category|^/cart|^/checkout"
+      ) ~ "Shop",
+
+      str_detect(
+        page_path_and_screen_class,
+        "member|membership"
+      ) ~ "Membership",
+
+      str_detect(
+        page_path_and_screen_class,
+        "^/my-account|^/login"
+      ) ~ "Account",
+
+      str_detect(
+        page_path_and_screen_class,
+        "^/about-us|^/our-team|^/contact-us|^/contact-archive|^/stav-council|^/our-partners|annual-general-meeting|^/our-history|working-party-committees|stav-80th-anniversary"
+      ) ~ "Organisation",
+
+      str_detect(
+        page_path_and_screen_class,
+        "^/forums|^/discussion-forums"
+      ) ~ "Forums / Community",
+
+      str_detect(
+        page_path_and_screen_class,
+        "^/wp-content/uploads/"
+      ) ~ "Files",
+
+      str_detect(
+        page_path_and_screen_class,
+        "^/gh"
+      ) ~ "System / Preferences",
+
+      TRUE ~ "Other"
+    )
+  )
+
+page_category_summary <- pages_classified %>%
+  group_by(page_category) %>%
+  summarise(
+    views = sum(views),
+    .groups = "drop"
+  ) %>%
+  mutate(
+    view_share = views / sum(views)
+  )
+
+page_category_summary %>%
+  slice_max(
+    order_by = views,
+    n = 7,
+    with_ties = FALSE
+  ) %>%
+  ggplot(
+    aes(
+      x = reorder(page_category, views),
+      y = views
+    )
+  ) +
+  geom_col() +
+  geom_text(
+    aes(
+      label = paste0(
+        scales::comma(views),
+        " (",
+        scales::percent(view_share, accuracy = 0.1),
+        ")"
+      )
+    ),
+    hjust = -0.1,
+    size = 3.5
+  ) +
+  coord_flip() +
+  scale_y_continuous(
+    labels = scales::comma,
+    expand = expansion(mult = c(0, 0.25))
+  ) +
+  labs(
+    title = "Website Views by Content Category",
+    subtitle = "STAV, July 2025 – June 2026",
+    x = NULL,
+    y = "Page views"
+  ) +
+  theme_minimal()
+```
+
+Landing pages show where visitors entered the website, while page views provide a broader picture of the content visitors viewed throughout their website sessions.
+
+Across the reporting period, STAV recorded 193,799 page views. Individual page paths were grouped into the same business-relevant content categories used in the landing-page analysis to provide a clearer view of overall content usage.
+
+**How to read this chart:**\
+A page view is recorded each time a page is viewed, including repeated views by the same user. Unlike the previous landing-page analysis, this chart includes pages viewed at any point during a website session, not only the first page visited.
+
+**What this means for STAV:** Science Talent Search was the most-viewed content category, generating 68,467 views, or approximately 35.3% of all website views. Events & Conferences accounted for 14.6%, while the Homepage accounted for 12.8%.
+
+Account-related pages represented 11.6% of all page views, compared with only 3.6% of landing-page sessions. This suggests that Account pages were more commonly encountered during website use than as the initial entry point to the website.
+
+## Monthly Content Trends
+
+Website content varied across the reporting period. The monthly analysis shows that different areas of the STAV website reached their highest levels at different times of the year, rather than following the same pattern throughout the year.
+
+```{r}
+#| label: monthly-content-setup
+#| include: false
+
+
+# ------------------------------------------------------------
+# Classify pages using the same categories as the annual analysis
+# ------------------------------------------------------------
+
+monthly_pages_classified <- monthly_pages %>%
+  mutate(
+    page_category = case_when(
+
+      page_path_and_screen_class == "/" ~
+        "Homepage",
+
+      str_detect(
+        page_path_and_screen_class,
+        "science-talent-search|^/sts-"
+      ) ~
+        "Science Talent Search",
+
+      str_detect(
+        page_path_and_screen_class,
+        "^/event/|^/events|^/events-calendar|^/workshops|conference|stavcon|call-for-abstracts|submitting-a-session|^/series/|^/venue/|^/organiser/"
+      ) ~
+        "Events & Conferences",
+
+      str_detect(
+        page_path_and_screen_class,
+        "^/publications|^/resources|^/stav-publishing|labtalk|conference-resources|teaching-science-journals|lets-find-out"
+      ) ~
+        "Resources & Publications",
+
+      str_detect(
+        page_path_and_screen_class,
+        "science-in-construction|national-science-week"
+      ) ~
+        "Science Programs & Initiatives",
+
+      str_detect(
+        page_path_and_screen_class,
+        "^/shop|^/product|^/product-category|^/cart|^/checkout"
+      ) ~
+        "Shop",
+
+      str_detect(
+        page_path_and_screen_class,
+        "member|membership"
+      ) ~
+        "Membership",
+
+      str_detect(
+        page_path_and_screen_class,
+        "^/my-account|^/login"
+      ) ~
+        "Account",
+
+      str_detect(
+        page_path_and_screen_class,
+        "^/about-us|^/our-team|^/contact-us|^/contact-archive|^/stav-council|^/our-partners|annual-general-meeting|^/our-history|working-party-committees|stav-80th-anniversary"
+      ) ~
+        "Organisation",
+
+      str_detect(
+        page_path_and_screen_class,
+        "^/forums|^/discussion-forums"
+      ) ~
+        "Forums / Community",
+
+      str_detect(
+        page_path_and_screen_class,
+        "^/wp-content/uploads/"
+      ) ~
+        "Files",
+
+      str_detect(
+        page_path_and_screen_class,
+        "^/gh"
+      ) ~
+        "System / Preferences",
+
+      TRUE ~
+        "Other"
+    ),
+
+    month_num = as.integer(month),
+
+    year = if_else(
+      month_num >= 7,
+      2025L,
+      2026L
+    ),
+
+    month_date = as.Date(
+      sprintf(
+        "%d-%02d-01",
+        year,
+        month_num
+      )
+    )
+  )
+
+
+# ------------------------------------------------------------
+# Summarise views by month and content category
+# ------------------------------------------------------------
+
+monthly_content <- monthly_pages_classified %>%
+  group_by(
+    month_date,
+    page_category
+  ) %>%
+  summarise(
+    views = sum(views, na.rm = TRUE),
+    .groups = "drop"
+  ) %>%
+  complete(
+    month_date = seq(
+      as.Date("2025-07-01"),
+      as.Date("2026-06-01"),
+      by = "month"
+    ),
+    page_category,
+    fill = list(views = 0)
+  )
+```
+
+The first chart focuses on STAV's main content, programs, events and resources.
+
+```{r}
+#| label: fig-monthly-content-activities
+#| fig-cap: "Monthly views for STAV content and activity areas"
+#| fig-width: 10
+#| fig-height: 8
+#| fig-align: center
+
+content_activity_categories <- c(
+  "Science Talent Search",
+  "Events & Conferences",
+  "Resources & Publications",
+  "Science Programs & Initiatives",
+  "Shop"
+)
+
+monthly_content %>%
+  filter(
+    page_category %in% content_activity_categories
+  ) %>%
+  mutate(
+    page_category = factor(
+      page_category,
+      levels = content_activity_categories
+    )
+  ) %>%
+  ggplot(
+    aes(
+      x = month_date,
+      y = views,
+      group = 1
+    )
+  ) +
+  geom_line(linewidth = 0.8) +
+  geom_point(size = 1.8) +
+
+  facet_wrap(
+    ~ page_category,
+    scales = "free_y",
+    ncol = 2
+  ) +
+
+  scale_x_date(
+    breaks = as.Date(c(
+      "2025-07-01",
+      "2025-10-01",
+      "2026-01-01",
+      "2026-04-01"
+    )),
+    date_labels = "%b\n%Y"
+  ) +
+
+  scale_y_continuous(
+    labels = scales::comma,
+    expand = expansion(
+      mult = c(0.05, 0.12)
+    )
+  ) +
+
+  labs(
+    title = "Monthly Views of STAV Content and Activities",
+    subtitle = "July 2025 – June 2026",
+    x = NULL,
+    y = "Page views"
+  ) +
+
+  theme_minimal() +
+
+  theme(
+    axis.text.x = element_text(size = 8),
+    axis.text.y = element_text(size = 8),
+    strip.text = element_text(
+      face = "bold",
+      size = 9
+    ),
+    panel.spacing = unit(1.2, "lines")
+  )
+```
+
+Science Talent Search showed the largest monthly variation, reaching **10,082 views in May 2026**, compared with its lowest level of **1,114 views in September 2025**. Events & Conferences peaked at **5,129 views in February 2026**, while Resources & Publications reached its highest level of **1,773 views in October 2025**. Shop activity peaked later in **June 2026**, with **1,521 views**.
+
+These differences indicate that demand for STAV's content and activities varies substantially throughout the year. The timing may reflect STAV's program, event and resource schedules; however, GA4 page-view data alone cannot determine the specific cause of each increase.
+
+
+## Website and Community Functions
+
+The second chart focuses on general website navigation, account, membership, organisation and community functions.
+
+```{r}
+#| label: fig-monthly-content-functions
+#| fig-cap: "Monthly views for STAV website and community functions"
+#| fig-width: 10
+#| fig-height: 8
+#| fig-align: center
+
+website_function_categories <- c(
+  "Homepage",
+  "Account",
+  "Membership",
+  "Organisation",
+  "Forums / Community"
+)
+
+monthly_content %>%
+  filter(
+    page_category %in% website_function_categories
+  ) %>%
+  mutate(
+    page_category = factor(
+      page_category,
+      levels = website_function_categories
+    )
+  ) %>%
+  ggplot(
+    aes(
+      x = month_date,
+      y = views,
+      group = 1
+    )
+  ) +
+  geom_line(linewidth = 0.8) +
+  geom_point(size = 1.8) +
+
+  facet_wrap(
+    ~ page_category,
+    scales = "free_y",
+    ncol = 2
+  ) +
+
+  scale_x_date(
+    breaks = as.Date(c(
+      "2025-07-01",
+      "2025-10-01",
+      "2026-01-01",
+      "2026-04-01"
+    )),
+    date_labels = "%b\n%Y"
+  ) +
+
+  scale_y_continuous(
+    labels = scales::comma,
+    expand = expansion(
+      mult = c(0.05, 0.12)
+    )
+  ) +
+
+  labs(
+    title = "Monthly Views of Website and Community Functions",
+    subtitle = "July 2025 – June 2026",
+    x = NULL,
+    y = "Page views"
+  ) +
+
+  theme_minimal() +
+
+  theme(
+    axis.text.x = element_text(size = 8),
+    axis.text.y = element_text(size = 8),
+    strip.text = element_text(
+      face = "bold",
+      size = 9
+    ),
+    panel.spacing = unit(1.2, "lines")
+  )
+```
+
+The Homepage reached its highest monthly level in **February 2026 with 2,766 views**, while Account pages peaked earlier in **August 2025 with 2,900 views**. Membership also reached its highest level in **February 2026 with 735 views**. These patterns show that the use of general website functions also changed across the year rather than remaining constant.
+
+
+## Peak and Lowest Months
+
+The table below summarises the highest and lowest monthly page-view levels for each business-relevant content category.
+
+```{r}
+#| label: tbl-monthly-content-peak-low
+#| echo: false
+
+peak_low_table <- monthly_content %>%
+  group_by(page_category) %>%
+  summarise(
+    peak_month =
+      month_date[which.max(views)],
+
+    peak_views =
+      max(views),
+
+    lowest_month =
+      month_date[which.min(views)],
+
+    lowest_views =
+      min(views),
+
+    .groups = "drop"
+  ) %>%
+
+  filter(
+    !page_category %in% c(
+      "Other",
+      "Files",
+      "System / Preferences"
+    )
+  ) %>%
+
+  mutate(
+    peak_month =
+      format(
+        peak_month,
+        "%b %Y"
+      ),
+
+    lowest_month =
+      format(
+        lowest_month,
+        "%b %Y"
+      )
+  ) %>%
+
+  rename(
+    "Content category" = page_category,
+    "Peak month" = peak_month,
+    "Peak views" = peak_views,
+    "Lowest month" = lowest_month,
+    "Lowest views" = lowest_views
+  )
+
+knitr::kable(
+  peak_low_table,
+  format.args = list(
+    big.mark = ","
+  ),
+  caption =
+    "Peak and lowest monthly page views by content category"
+)
+```
+
+
+# Audience and Devices
+
+## New and Returning Users
+```{r}
+#| label: fig-new-returning-users
+#| fig-width: 8
+#| fig-height: 4.5
+#| fig-align: center
+
+user_type <- tibble(
+  user_type = factor(
+    c("New users", "Returning users"),
+    levels = c("New users", "Returning users")
+  ),
+  users = c(54000, 9300)
+)
+
+
+ggplot(user_type, aes(x = reorder(user_type, users), y = users)) +
+  geom_col(width = 0.6) +
+  geom_text(
+    aes(label = scales::comma(users)),
+    vjust = -0.5,
+    size = 5
+  ) +
+  scale_y_continuous(
+    labels = scales::label_comma(),
+    expand = expansion(mult = c(0, 0.12))
+  ) +
+  labs(
+    x = NULL,
+    y = "Users",
+    title = "New and Returning Users"
+  ) +
+  theme_minimal(base_size = 14) +
+  theme(
+    panel.grid.major.x = element_blank(),
+    panel.grid.minor = element_blank()
+  )
+```
+During the reporting period from **1 July 2025 to 30 June 2026**, GA4 recorded approximately **54,000 new users** and **9,300 returning users**. The figures indicate that the website reached a large number of new users during the year, alongside a smaller but notable returning audience.
+
+New and returning users are not mutually exclusive in GA4. A user may first be counted as a new user and later also be counted as a returning user if they revisit the website. Therefore, these figures should not be added together to estimate total users.
+
+The higher number of new users may partly reflect visitors discovering STAV through search engines when looking for specific events, resources or Science Talent Search information. Returning users may include visitors who revisit the website for ongoing activities such as accessing resources, checking events or using account functions. These are possible explanations based on the observed traffic and content patterns， GA4 does not directly identify why individual users return to the website.
+
+
+## Device Category
+
+Device data provides an indication of how visitors access the STAV website. The analysis compares desktop, mobile and tablet usage, while recognising that the same person may use the website on more than one device.
+
+```{r}
+#| label: fig-device-category
+#| fig-cap: "Website Active Users by Device Category"
+#| fig-width: 9
+#| fig-height: 5.5
+
+device_summary <- device %>%
+  mutate(
+    active_user_share = active_users / sum(active_users)
+  )
+
+ggplot(
+  device_summary,
+  aes(
+    x = reorder(device_category, active_users),
+    y = active_users
+  )
+) +
+  geom_col() +
+
+  # Active User count inside longer bars
+  geom_text(
+    data = device_summary %>% filter(active_users >= 5000),
+    aes(label = scales::comma(active_users)),
+    hjust = 1.15,
+    size = 4
+  ) +
+
+  # Active User count outside shorter bars
+  geom_text(
+    data = device_summary %>% filter(active_users < 5000),
+    aes(label = scales::comma(active_users)),
+    hjust = -0.2,
+    size = 4
+  ) +
+
+  # User share and engagement rate
+  geom_text(
+    aes(
+      y = 52000,
+      label = paste0(
+        scales::percent(active_user_share, accuracy = 0.1),
+        " of users | ",
+        scales::percent(engagement_rate, accuracy = 0.1),
+        " engagement"
+      )
+    ),
+    hjust = 0,
+    size = 3.6
+  ) +
+
+  coord_flip() +
+
+  scale_y_continuous(
+    labels = scales::comma,
+    limits = c(0, 80000),
+    expand = expansion(mult = c(0, 0))
+  ) +
+
+  labs(
+    title = "Website Active Users by Device Category",
+    subtitle = "User share and engagement rate by device",
+    x = NULL,
+    y = "Device-level Active Users"
+  ) +
+
+  theme_minimal()
+
+```
+
+**How to read this chart:**\
+Active Users represent users who actively used the website. The percentages shown here represent the share of device-level Active Users. A person who uses STAV's website on more than one device may appear in more than one device category.
+
+**What this means for STAV:** Website usage was strongly desktop-oriented, with desktop accounting for approximately 83.4% of device-level Active Users. Mobile represented 15.9%, while tablet usage was relatively small.
+
+Although mobile represented a much smaller share of users, mobile traffic recorded an engagement rate of 50.4%, compared with 42.0% for desktop. This indicates that mobile remains an important part of website usage despite the website's strong desktop orientation.
+
+## Geographic Distribution
+
+Geographic data provides an indication of where website activity was recorded. However, user counts alone should not be interpreted as evidence of a meaningful audience in a particular country. Engagement measures are also considered to provide additional context.
+
+```{r}
+#| label: fig-country
+#| fig-cap: "Top countries by Active Users"
+#| fig-width: 9
+#| fig-height: 5.5
+
+country_summary <- country %>%
+  mutate(
+    active_user_share = active_users / sum(active_users)
+  ) %>%
+  slice_max(
+    order_by = active_users,
+    n = 5,
+    with_ties = FALSE
+  )
+
+ggplot(
+  country_summary,
+  aes(
+    x = reorder(country, active_users),
+    y = active_users
+  )
+) +
+  geom_col() +
+
+  # User number inside longer bars
+  geom_text(
+    data = country_summary %>% filter(active_users >= 5000),
+    aes(label = scales::comma(active_users)),
+    hjust = 1.15,
+    size = 4
+  ) +
+
+  # User number outside shorter bars
+  geom_text(
+    data = country_summary %>% filter(active_users < 5000),
+    aes(label = scales::comma(active_users)),
+    hjust = -0.2,
+    size = 4
+  ) +
+
+  # User share + engagement
+  geom_text(
+    aes(
+      y = 42000,
+      label = paste0(
+        scales::percent(active_user_share, accuracy = 0.1),
+        " of users | ",
+        scales::percent(engagement_rate, accuracy = 0.1),
+        " engagement"
+      )
+    ),
+    hjust = 0,
+    size = 3.5
+  ) +
+
+  coord_flip() +
+
+  scale_y_continuous(
+    labels = scales::comma,
+    limits = c(0, 70000),
+    expand = expansion(mult = c(0, 0))
+  ) +
+
+  labs(
+    title = "Top Countries by Active Users",
+    subtitle = "User share and engagement rate by country",
+    x = NULL,
+    y = "Country-level Active Users"
+  ) +
+
+  theme_minimal()
+```
+
+“Engagement rate is basically the percentage of sessions that GA4 considers meaningfully engaged. A session is considered engaged if it lasts more than 10 seconds, has a key event, or has at least two page or screen views.”
+
+**How to read this chart:**\
+The chart shows the countries with the highest country-level Active User counts. The percentages represent each country's share of country-level Active Users, while the engagement rate provides additional context about how frequently sessions from each country were classified by GA4 as engaged.
+
+**What this means for STAV:** Australia was the dominant location for meaningful website activity, representing approximately 64.9% of country-level Active Users and generating 85.5% of recorded website events.
+
+China and Singapore each represented approximately 11% of country-level Active Users, but their engagement rates were substantially lower than Australia's. These high user counts should therefore not automatically be interpreted as comparably engaged international audiences.
+
+Vietnam recorded a high engagement rate, but its much smaller user volume means this result should be interpreted cautiously.
+
+# User Behaviour
+
+GA4 also records interactions that occur while visitors use the website. These events provide additional information about how users interact with STAV's content and website functions beyond simply viewing pages.
+
+The analysis focuses on tracked behaviour events such as scrolling, clicks, form activity, file downloads, video interactions and internal search.
+
+```{r}
+#| label: fig-user-behaviour
+#| fig-cap: "Tracked user behaviour events on the STAV website"
+#| fig-width: 9
+#| fig-height: 6
+
+overall_active_users <- 55599
+
+# Select behaviour-related events
+behaviour_events <- events %>%
+  filter(
+    event_name %in% c(
+      "scroll",
+      "form_start",
+      "click",
+      "form_submit",
+      "file_download",
+      "video_start",
+      "video_progress",
+      "video_complete",
+      "view_search_results"
+    )
+  ) %>%
+  mutate(
+    user_percentage = total_users / overall_active_users
+  )
+
+# Create chart
+ggplot(
+  behaviour_events,
+  aes(
+    x = reorder(event_name, event_count),
+    y = event_count
+  )
+) +
+  geom_col() +
+
+  # Event count inside longer bars
+  geom_text(
+    data = behaviour_events %>% filter(event_count >= 5000),
+    aes(label = scales::comma(event_count)),
+    hjust = 1.15,
+    size = 3.8
+  ) +
+
+  # Event count outside shorter bars
+  geom_text(
+    data = behaviour_events %>% filter(event_count < 5000),
+    aes(label = scales::comma(event_count)),
+    hjust = -0.15,
+    size = 3.8
+  ) +
+
+  # Number of users and percentage
+  geom_text(
+    aes(
+      y = 68000,
+      label = paste0(
+        scales::comma(total_users),
+        " users | ",
+        scales::percent(user_percentage, accuracy = 0.1)
+      )
+    ),
+    hjust = 0,
+    size = 3.4
+  ) +
+
+  coord_flip() +
+
+  scale_y_continuous(
+    labels = scales::comma,
+    limits = c(0, 100000),
+    expand = expansion(mult = c(0, 0))
+  ) +
+
+  labs(
+    title = "Tracked User Behaviour Events",
+    subtitle = "Event volume and users who triggered each event",
+    x = NULL,
+    y = "Number of events"
+  ) +
+
+  theme_minimal()
+```
+
+**How to read this chart:**\
+An event is recorded when a tracked interaction occurs on the website. Event counts represent the number of times an interaction was recorded, not the number of individual users. The same user may generate the same event multiple times.
+
+**What this means for STAV:** Users interacted with the website beyond simply viewing pages. GA4 recorded 60,220 scroll events, 20,562 form-start events, 17,027 click events, 11,890 form-submit events and 9,756 file-download events during the reporting period.
+
+These results show substantial use of website content and functions. However, through the currently available GA4 reporting, it is not possible to identify the specific forms or files associated with these events. As a result, the analysis cannot directly determine which STAV services, resources or activities generated these interactions.
+
+
+
+# Recent User Journey Exploration
+
+This supplementary analysis uses GA4 Path Exploration to examine recent website navigation behaviour. As historical Exploration data was not available for the main reporting period, the analysis uses the currently available period from 1 August to 30 September 2026.
+
+## Science Talent Search User Journey
+
+```{r}
+#| echo: false
+#| out-width: "90%"
+#| fig-align: center
+#| fig-cap: "Navigation paths following the Science Talent Search page, 1 August–30 September 2026"
+
+knitr::include_graphics("../data/GA4/ga4_sts_path_exploration_aug_sep_2026.png")
+```
+
+Using /science-talent-search/ as the starting point, the most common next-page paths included the homepage (97 events), the 2025 Awards Showcase (94), STS Resources (79), Latest News (28), My Account (26) and STS Entries (25). This indicates that users navigating beyond the main STS page frequently continued to other STS-related content, particularly the Awards Showcase and STS Resources.
+
+## Homepage User Journey
+
+```{r}
+#| echo: false
+#| out-width: "90%"
+#| fig-align: center
+#| fig-cap: "Navigation paths following the homepage, 1 August–30 September 2026"
+
+knitr::include_graphics("../data/GA4/ga4_homepage_path_exploration_aug_sep_2026.png")
+```
+
+
+Using the homepage (/) as the starting point, GA4 recorded 3,761 events at this node during the exploration period. The most common next-page paths included /testing-redirect-a/ (292 events), /my-account/ (235), /events/ (134), /science-talent-search/ (132), /publications/trial-exams/ (126) and /become-a-member/ (83).
+The results show that users navigating beyond the homepage moved across several important STAV functions and content areas, including account access, events, Science Talent Search, publications and membership. This suggests that the homepage acts as a navigation point to multiple areas of the website rather than directing users primarily toward a single content area.
+These figures represent path events in GA4 Exploration rather than unique users.
+# Measurement and Data Limitations
+
+The analysis identified several limitations in the current GA4 measurement setup. These limitations do not prevent the website data from being useful, but they affect how some results should be interpreted.
+
+### Active Users are not additive
+
+GA4 reported **55,599 Active Users** for the website during the reporting period. However, Active Users should not be added across individual pages, countries or devices because the same person may appear in multiple rows.
+
+For example, summing Active Users across individual page rows produces 107,586, but this does not represent 107,586 different people. Therefore, the GA4 report-level figure of 55,599 is used when describing the overall website audience, while row-level Active Users are used only for comparisons within individual reports.
+
+### Some traffic could not be fully identified
+
+GA4 recorded **6,566 landing-page sessions as "(not set)"**, representing approximately 7.2% of report-level sessions. A smaller "(not set)" value also appeared in the source/medium data.
+
+These records indicate that some website activity could not be assigned to an identifiable landing page or traffic source in the available reports. The aggregate data used in this analysis does not establish the exact cause.
+
+### Key Events were not recorded
+
+Key Events are not currently configured around active website interactions
+Upon checking the GA4 property directly, a range of recent website events were identified, including form_submit, file_download, click, scroll and video interactions. However, none of these recently active events are currently marked as Key Events. The only Key Event listed in GA4 is purchase, for which no recent stream data was detected.
+This limits the ability to distinguish routine website interactions from actions that STAV considers meaningful organisational outcomes.
+
+### Behaviour events lack business context
+
+GA4 recorded substantial volumes of form activity, file downloads, clicks and other interactions. However, the available annual event data does not provide enough detail to consistently identify the specific form, file or STAV resource associated with each interaction.
+
+For example, the data shows that file-download events occurred 9,756 times, but it does not identify which resources generated those downloads. Similarly, form-start and form-submit event counts cannot be treated as a form completion rate because the aggregate data does not link individual starts and submissions to the same form or user journey.
+
+### Historical New and Returning User Analysis
+
+GA4 provides report-level counts of new and returning users for the full reporting period. However, detailed historical comparisons of their engagement behaviour could not be conducted because the required data falls outside the property's available GA4 Exploration data-retention window.
+
+###  Historical User Journey Analysis
+A detailed analysis of where users navigated next or exited the website could not be reproduced for the full reporting period using the currently available GA4 data. Historical path-level analysis would require Exploration data beyond what is currently available in the property's data-retention window.
+
+# Recommendations
+
+Based on the findings, five practical actions are recommended for STAV.
+
+### 1. Focus website maintenance on the most-used content
+
+Science Talent Search was the largest content area, accounting for 31.7% of landing-page sessions and 35.3% of page views. Event and conference pages were also among the most frequently viewed areas of the website.
+
+STAV should prioritise these high-use pages when reviewing website content. A simple approach would be to review the 20 most-viewed pages every three months and check for outdated information, broken links and unclear navigation.
+
+### 2. Protect important pages that receive search traffic
+
+Organic Search generated 43.5% of annual website sessions, with Google providing most of this traffic.
+
+Before deleting, renaming or moving an important page, STAV should check whether it receives significant search traffic. If a page URL changes, the old URL should redirect users to the new page. Clear page titles and headings should also be maintained on important STAV content.
+
+### 3. Regularly test important tasks on mobile
+
+Mobile represented 15.9% of device-level Active Users and recorded a 50.4% engagement rate.
+
+STAV should regularly test important website tasks on a mobile phone, such as finding an event, accessing STS information, downloading a resource, completing a form and using account functions. Problems affecting these important tasks should be prioritised when website improvements are made.
+
+### 4. Track which forms and files users interact with
+
+GA4 recorded substantial form and download activity, but the current data does not clearly show which forms were submitted or which files were downloaded.
+
+STAV should add more detail to these events. For example, form events could include a `form_name`, while download events could include a `file_name` and `resource_type`.
+
+This would allow STAV to identify which forms and resources are actually being used most often.
+
+### 5. Set up meaningful Key Events and regular reporting
+
+No Key Events were recorded in the analysed GA4 reports. STAV should identify the website actions that are most important to the organisation and track these as Key Events in GA4. For example, this could include completing an important form or another website action that STAV wants to measure.
+
+STAV could then review a simple GA4 report every month or quarter covering website traffic, popular content, traffic sources and important user actions. This would make it easier to understand not only how people use the website, but also whether they complete the actions that matter to STAV.
+
+# Conclusion
+
+This analysis provides an overview of how the STAV website was used between July 2025 and June 2026.
+
+The results show that Direct and Organic Search were the main ways users reached the website, while Science Talent Search was the most important content area both for website entry and overall page viewing. Website activity was mainly desktop-based and strongly concentrated in Australia. Users also interacted with the website through forms, downloads, clicks and other tracked actions.
+
+The analysis also identified opportunities to make GA4 more useful for STAV. In particular, adding more detail to form and download tracking and defining meaningful Key Events would help STAV understand not only how people use the website, but also which website activities are most important to the organisation.
+
+Overall, the current GA4 data provides a useful picture of website activity. With more focused tracking and regular reporting, STAV can use this information more effectively to support future website decisions.
