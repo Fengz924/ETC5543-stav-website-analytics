@@ -116,3 +116,20 @@ The analysis identified six key findings:
 
 Based on these findings, the report recommends prioritising high-demand content such as Science Talent Search, maintaining STAV's Organic Search visibility, regularly testing important mobile website tasks, improving the detail captured for forms and file downloads, and tracking the website actions that matter most to STAV.
 
+# Project Objective and Scope
+
+The purpose of this analysis is to help STAV understand how people use its website, where website traffic comes from, which content receives the most attention, and how website measurement could be improved in the future.
+
+The analysis focuses on website activity recorded in Google Analytics 4 (GA4) between **1 July 2025 and 30 June 2026**. It examines overall traffic patterns, acquisition channels and sources, landing pages, website content, device usage, geographic distribution and tracked user behaviour.
+
+The analysis addresses four main questions:
+
+1.  How do users reach the STAV website, and how does website traffic change over time?
+2.  Which website content and entry points attract the most activity?
+3.  What do the available device and geographic data indicate about the website audience?
+4.  What user interactions are currently captured by GA4, and where are there opportunities to improve measurement?
+
+This report focuses specifically on the **GA4 website analytics component** of the internship project.
+
+The analysis is intended to support practical decision-making rather than evaluate website performance against an external benchmark. Findings are therefore interpreted using patterns observed within STAV's own GA4 data.
+
