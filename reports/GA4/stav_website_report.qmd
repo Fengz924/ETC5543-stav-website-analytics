@@ -1329,3 +1329,38 @@ knitr::include_graphics("../data/GA4/ga4_homepage_path_exploration_aug_sep_2026.
 Using the homepage (/) as the starting point, GA4 recorded 3,761 events at this node during the exploration period. The most common next-page paths included /testing-redirect-a/ (292 events), /my-account/ (235), /events/ (134), /science-talent-search/ (132), /publications/trial-exams/ (126) and /become-a-member/ (83).
 The results show that users navigating beyond the homepage moved across several important STAV functions and content areas, including account access, events, Science Talent Search, publications and membership. This suggests that the homepage acts as a navigation point to multiple areas of the website rather than directing users primarily toward a single content area.
 These figures represent path events in GA4 Exploration rather than unique users.
+# Measurement and Data Limitations
+
+The analysis identified several limitations in the current GA4 measurement setup. These limitations do not prevent the website data from being useful, but they affect how some results should be interpreted.
+
+### Active Users are not additive
+
+GA4 reported **55,599 Active Users** for the website during the reporting period. However, Active Users should not be added across individual pages, countries or devices because the same person may appear in multiple rows.
+
+For example, summing Active Users across individual page rows produces 107,586, but this does not represent 107,586 different people. Therefore, the GA4 report-level figure of 55,599 is used when describing the overall website audience, while row-level Active Users are used only for comparisons within individual reports.
+
+### Some traffic could not be fully identified
+
+GA4 recorded **6,566 landing-page sessions as "(not set)"**, representing approximately 7.2% of report-level sessions. A smaller "(not set)" value also appeared in the source/medium data.
+
+These records indicate that some website activity could not be assigned to an identifiable landing page or traffic source in the available reports. The aggregate data used in this analysis does not establish the exact cause.
+
+### Key Events were not recorded
+
+Key Events are not currently configured around active website interactions
+Upon checking the GA4 property directly, a range of recent website events were identified, including form_submit, file_download, click, scroll and video interactions. However, none of these recently active events are currently marked as Key Events. The only Key Event listed in GA4 is purchase, for which no recent stream data was detected.
+This limits the ability to distinguish routine website interactions from actions that STAV considers meaningful organisational outcomes.
+
+### Behaviour events lack business context
+
+GA4 recorded substantial volumes of form activity, file downloads, clicks and other interactions. However, the available annual event data does not provide enough detail to consistently identify the specific form, file or STAV resource associated with each interaction.
+
+For example, the data shows that file-download events occurred 9,756 times, but it does not identify which resources generated those downloads. Similarly, form-start and form-submit event counts cannot be treated as a form completion rate because the aggregate data does not link individual starts and submissions to the same form or user journey.
+
+### Historical New and Returning User Analysis
+
+GA4 provides report-level counts of new and returning users for the full reporting period. However, detailed historical comparisons of their engagement behaviour could not be conducted because the required data falls outside the property's available GA4 Exploration data-retention window.
+
+###  Historical User Journey Analysis
+A detailed analysis of where users navigated next or exited the website could not be reproduced for the full reporting period using the currently available GA4 data. Historical path-level analysis would require Exploration data beyond what is currently available in the property's data-retention window.
+
