@@ -138,3 +138,123 @@ monthly %>%
   print(n = 20)
 
 
+# ============================================================
+# 3. DATA VALIDATION — ANNUAL VS MONTHLY TRAFFIC ACQUISITION
+# ============================================================
+
+
+# ------------------------------------------------------------
+# 3.1 Check monthly data structure
+# ------------------------------------------------------------
+
+# Confirm that all 12 months are present
+monthly %>%
+  distinct(date) %>%
+  arrange(date)
+
+# Check for duplicate month-channel combinations
+monthly %>%
+  count(
+    date,
+    session_primary_channel_group_default_channel_group
+  ) %>%
+  filter(n > 1)
+
+
+# ------------------------------------------------------------
+# 3.2 Reconcile annual and monthly channel totals
+# ------------------------------------------------------------
+
+reconciliation <- channel %>%
+  transmute(
+    channel =
+      session_primary_channel_group_default_channel_group,
+    annual_sessions = sessions
+  ) %>%
+  full_join(
+    monthly %>%
+      group_by(
+        channel =
+          session_primary_channel_group_default_channel_group
+      ) %>%
+      summarise(
+        monthly_sum_sessions = sum(sessions),
+        .groups = "drop"
+      ),
+    by = "channel"
+  ) %>%
+  mutate(
+    difference =
+      monthly_sum_sessions - annual_sessions,
+    difference_pct =
+      100 * difference / annual_sessions
+  ) %>%
+  arrange(desc(abs(difference)))
+
+reconciliation
+
+
+# ------------------------------------------------------------
+# 3.3 Overall reconciliation
+# ------------------------------------------------------------
+
+annual_total <- sum(channel$sessions)
+
+monthly_total_check <- sum(monthly$sessions)
+
+total_difference <-
+  monthly_total_check - annual_total
+
+total_difference_pct <-
+  total_difference / annual_total * 100
+
+annual_total
+monthly_total_check
+total_difference
+total_difference_pct
+
+
+# ------------------------------------------------------------
+# Data validation note
+# ------------------------------------------------------------
+
+# Data validation identified a small discrepancy between aggregation
+# levels.
+#
+# Annual Traffic Acquisition export:
+# 92,227 sessions
+#
+# Sum of monthly Traffic Acquisition export:
+# 91,715 sessions
+#
+# Difference:
+# -512 sessions (-0.56%)
+#
+# Checks confirmed that all 12 months were present and that there were
+# no duplicate month-channel combinations.
+#
+# One likely explanation is GA4's use of approximate distinct counting
+# for session metrics, combined with differences in query granularity
+# when the Month dimension is added. Google notes that session counts
+# may use HyperLogLog++ estimation and that discrepancies are generally
+# below 1%.
+#
+# Other GA4 reporting mechanisms, including differences in aggregation,
+# attribution, reporting tables, thresholding, or sampling, may also
+# contribute to differences between queries. However, the exported data
+# do not provide sufficient evidence to identify one specific mechanism
+# as the definitive cause.
+#
+# Analysis decision:
+# - Annual export is used for annual channel composition and
+#   annual channel-level metrics.
+# - Monthly export is used for monthly trends and month-to-month
+#   channel changes.
+# - Monthly values are not manually adjusted to force agreement
+#   with the annual total.
+#
+# Reference:
+# Google Analytics Help – Unique count approximation with HLL++
+# https://support.google.com/analytics/answer/13331292
+
+
