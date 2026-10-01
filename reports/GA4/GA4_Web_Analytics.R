@@ -817,3 +817,228 @@ ggplot(
   theme_minimal()
 
 
+# ============================================================
+# 8. SOURCE / MEDIUM ANALYSIS
+# ============================================================
+
+
+# ------------------------------------------------------------
+# 8.1 Import and clean source / medium data
+# ------------------------------------------------------------
+
+source_medium <- read_csv(
+  "data/raw/GA4/traffic_source_medium_20250701_20260630.csv",
+  skip = 9,
+  show_col_types = FALSE
+) %>%
+  clean_names()
+
+glimpse(source_medium)
+
+
+# ------------------------------------------------------------
+# 8.2 Basic data validation
+# ------------------------------------------------------------
+
+# Number of source / medium combinations
+nrow(source_medium)
+
+# Row-level totals
+sum(source_medium$sessions)
+sum(source_medium$engaged_sessions)
+
+# Check missing values
+source_medium %>%
+  summarise(
+    missing_source_medium =
+      sum(is.na(session_source_medium)),
+    missing_sessions =
+      sum(is.na(sessions)),
+    missing_engaged_sessions =
+      sum(is.na(engaged_sessions))
+  )
+
+# Check duplicate source / medium combinations
+source_medium %>%
+  count(session_source_medium) %>%
+  filter(n > 1)
+
+
+# ------------------------------------------------------------
+# 8.3 Inspect highest-traffic sources
+# ------------------------------------------------------------
+
+source_medium %>%
+  arrange(desc(sessions)) %>%
+  select(
+    session_source_medium,
+    sessions,
+    engaged_sessions,
+    engagement_rate,
+    average_engagement_time_per_session,
+    events_per_session
+  ) %>%
+  print(n = 20)
+
+
+# ------------------------------------------------------------
+# 8.4 Validate source / medium totals
+# ------------------------------------------------------------
+
+source_medium_total <- sum(source_medium$sessions)
+
+channel_annual_total <- sum(channel$sessions)
+
+source_medium_difference <-
+  source_medium_total - channel_annual_total
+
+source_medium_difference_pct <-
+  source_medium_difference / channel_annual_total * 100
+
+source_medium_total
+channel_annual_total
+source_medium_difference
+source_medium_difference_pct
+
+
+# Data validation note:
+#
+# The Source / Medium export contained 92,052 row-level sessions,
+# compared with 92,227 sessions in the annual Channel export.
+#
+# Difference = -175 sessions (approximately -0.19%).
+#
+# No missing or duplicate source / medium values were identified.
+#
+# As with the earlier GA4 reconciliation checks, the original values
+# are retained rather than manually adjusted.
+#
+# The Channel export is used for annual channel-level composition,
+# while the Source / Medium export is used to analyse individual
+# traffic sources.
+
+
+# ------------------------------------------------------------
+# 8.5 Calculate source / medium traffic contribution
+# ------------------------------------------------------------
+
+source_medium_summary <- source_medium %>%
+  mutate(
+    session_share =
+      sessions / source_medium_total * 100
+  ) %>%
+  arrange(desc(sessions))
+
+source_medium_summary %>%
+  select(
+    session_source_medium,
+    sessions,
+    session_share,
+    engaged_sessions,
+    engagement_rate,
+    average_engagement_time_per_session,
+    events_per_session
+  ) %>%
+  print(n = 20)
+
+
+# ------------------------------------------------------------
+# 8.6 Organic search source analysis
+# ------------------------------------------------------------
+
+organic_sources <- source_medium_summary %>%
+  filter(
+    str_detect(session_source_medium, "/ organic")
+  ) %>%
+  select(
+    session_source_medium,
+    sessions,
+    session_share,
+    engagement_rate,
+    average_engagement_time_per_session,
+    events_per_session
+  ) %>%
+  arrange(desc(sessions))
+
+organic_sources %>%
+  print(n = 20)
+
+
+# ------------------------------------------------------------
+# 8.7 Referral source analysis
+# ------------------------------------------------------------
+
+referral_sources <- source_medium_summary %>%
+  filter(
+    str_detect(session_source_medium, "/ referral")
+  ) %>%
+  select(
+    session_source_medium,
+    sessions,
+    session_share,
+    engagement_rate,
+    average_engagement_time_per_session,
+    events_per_session
+  ) %>%
+  arrange(desc(sessions))
+
+referral_sources %>%
+  print(n = 30)
+
+
+# ------------------------------------------------------------
+# 8.8 Visualise top traffic sources
+# ------------------------------------------------------------
+
+top_sources <- source_medium_summary %>%
+  filter(session_source_medium != "(not set)") %>%
+  slice_max(
+    order_by = sessions,
+    n = 10,
+    with_ties = FALSE
+  )
+
+ggplot(
+  top_sources,
+  aes(
+    x = reorder(session_source_medium, sessions),
+    y = sessions
+  )
+) +
+  geom_col() +
+  coord_flip() +
+  scale_y_continuous(
+    labels = scales::comma
+  ) +
+  labs(
+    title = "Top Traffic Sources to the STAV Website",
+    subtitle = "1 July 2025 – 30 June 2026",
+    x = NULL,
+    y = "Sessions"
+  ) +
+  theme_minimal()
+
+# ------------------------------------------------------------
+# 8.9 Source concentration
+# ------------------------------------------------------------
+
+source_concentration <- source_medium_summary %>%
+  filter(session_source_medium != "(not set)") %>%
+  arrange(desc(sessions)) %>%
+  mutate(
+    rank = row_number(),
+    cumulative_sessions = cumsum(sessions),
+    cumulative_share =
+      cumulative_sessions / source_medium_total * 100
+  )
+
+source_concentration %>%
+  filter(rank %in% c(1, 2, 3, 5, 10, 20)) %>%
+  select(
+    rank,
+    session_source_medium,
+    sessions,
+    cumulative_sessions,
+    cumulative_share
+  )
+
