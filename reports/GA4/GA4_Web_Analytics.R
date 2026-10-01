@@ -1810,3 +1810,80 @@ country_summary %>%
 
 #Australia was the largest source of website users and accounted for 85.5% of recorded events. Although China, Singapore and the United States also recorded relatively high Active User counts, their substantially lower engagement rates indicate that these figures should be interpreted cautiously
 
+# ============================================================
+# 12. EVENT / USER BEHAVIOUR ANALYSIS
+# ============================================================
+
+
+# ------------------------------------------------------------
+# 12.1 Import and inspect event data
+# ------------------------------------------------------------
+
+events <- read_csv(
+  "data/raw/GA4/events_20250701_20260630.csv",
+  skip = 9,
+  show_col_types = FALSE
+) %>%
+  clean_names()
+
+glimpse(events)
+
+names(events)
+
+nrow(events)
+
+events %>%
+  arrange(desc(event_count)) %>%
+  print(n = 20)
+
+# ------------------------------------------------------------
+# 12.2 User behaviour events
+# ------------------------------------------------------------
+
+behaviour_events <- events %>%
+  filter(
+    event_name %in% c(
+      "scroll",
+      "click",
+      "form_start",
+      "form_submit",
+      "file_download",
+      "video_start",
+      "video_progress",
+      "video_complete",
+      "view_search_results"
+    )
+  ) %>%
+  arrange(desc(event_count))
+
+behaviour_events
+
+
+# ------------------------------------------------------------
+# 12.3 Visualise tracked user behaviours
+# ------------------------------------------------------------
+
+ggplot(
+  behaviour_events,
+  aes(
+    x = reorder(event_name, event_count),
+    y = event_count
+  )
+) +
+  geom_col() +
+  coord_flip() +
+  scale_y_continuous(labels = scales::comma) +
+  labs(
+    title = "Tracked User Behaviour Events",
+    subtitle = "STAV, 1 July 2025 – 30 June 2026",
+    x = NULL,
+    y = "Event Count"
+  ) +
+  theme_minimal()
+
+#Tracked website behaviour extended beyond page viewing. GA4 recorded 60,220 scroll events, 20,562 form-start events, 17,027 click events, 11,890 form-submit events and 9,756 file-download events during the reporting period. These results indicate substantial interaction with website content and functionality. However, the available aggregate GA4 data does not identify the specific forms or downloaded files associated with these events. Form-start and form-submit counts should therefore not be interpreted as a completion rate. More detailed event parameters would allow future reporting to connect these interactions to specific STAV services, resources and business outcomes.
+
+# ============================================================
+# END OF ANALYSIS
+# Final narrative findings and recommendations are maintained in the QMD report.
+# ============================================================
