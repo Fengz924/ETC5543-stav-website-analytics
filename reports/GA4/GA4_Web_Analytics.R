@@ -321,3 +321,68 @@ ggplot(
 # without additional evidence.
 
 
+# ============================================================
+# 5. MONTHLY CHANNEL ANALYSIS
+# ============================================================
+
+
+# ------------------------------------------------------------
+# 5.1 Select major acquisition channels
+# ------------------------------------------------------------
+
+monthly_channel <- monthly %>%
+  filter(
+    session_primary_channel_group_default_channel_group %in%
+      c(
+        "Direct",
+        "Organic Search",
+        "Referral",
+        "Organic Social"
+      )
+  )
+
+
+# Check annual sums from monthly data for selected channels
+monthly_channel %>%
+  group_by(
+    session_primary_channel_group_default_channel_group
+  ) %>%
+  summarise(
+    sessions = sum(sessions),
+    .groups = "drop"
+  ) %>%
+  arrange(desc(sessions))
+
+
+# ------------------------------------------------------------
+# 5.2 Visualise monthly sessions by channel
+# ------------------------------------------------------------
+
+ggplot(
+  monthly_channel,
+  aes(
+    x = date,
+    y = sessions,
+    colour =
+      session_primary_channel_group_default_channel_group
+  )
+) +
+  geom_line(linewidth = 1) +
+  geom_point(size = 2) +
+  scale_x_date(
+    date_breaks = "1 month",
+    date_labels = "%b\n%Y"
+  ) +
+  scale_y_continuous(
+    labels = scales::comma
+  ) +
+  labs(
+    title = "Monthly Website Sessions by Channel",
+    subtitle = "STAV, July 2025 – June 2026",
+    x = NULL,
+    y = "Sessions",
+    colour = "Channel"
+  ) +
+  theme_minimal()
+
+
