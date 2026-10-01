@@ -1400,3 +1400,12 @@ No Key Events were recorded in the analysed GA4 reports. STAV should identify th
 
 STAV could then review a simple GA4 report every month or quarter covering website traffic, popular content, traffic sources and important user actions. This would make it easier to understand not only how people use the website, but also whether they complete the actions that matter to STAV.
 
+# Conclusion
+
+This analysis provides an overview of how the STAV website was used between July 2025 and June 2026.
+
+The results show that Direct and Organic Search were the main ways users reached the website, while Science Talent Search was the most important content area both for website entry and overall page viewing. Website activity was mainly desktop-based and strongly concentrated in Australia. Users also interacted with the website through forms, downloads, clicks and other tracked actions.
+
+The analysis also identified opportunities to make GA4 more useful for STAV. In particular, adding more detail to form and download tracking and defining meaningful Key Events would help STAV understand not only how people use the website, but also which website activities are most important to the organisation.
+
+Overall, the current GA4 data provides a useful picture of website activity. With more focused tracking and regular reporting, STAV can use this information more effectively to support future website decisions.
