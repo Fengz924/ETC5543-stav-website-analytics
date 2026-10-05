@@ -1,0 +1,6 @@
+project:
+  type: default
+  execute-dir: project
+  output-dir: outputs/build
+  render:
+    - reports/final_report.qmd

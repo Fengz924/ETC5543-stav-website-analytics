@@ -82,10 +82,31 @@ reports/CRM/*.original.qmd
 
 # Allow fictional example data
 !data/example/
-!data/example/**
+data/example/*
+!data/example/CRM/
+data/example/CRM/*
+!data/example/CRM/crm_contacts_synthetic.csv
 
 # macOS metadata remains excluded
 .DS_Store
 
 # Microsoft Office temporary lock files
 ~$*
+
+# Approved sanitised inventory at its migrated location
+!docs/STAV_Master_Data_Inventory_Sanitized.xlsx
+
+# Quarto project state and intermediate files
+.quarto/
+_freeze/
+*.qmd.md
+
+# Generated builds and unapproved final outputs
+/outputs/
+
+# Local environment and credentials
+.env
+.env.*
+
+/.quarto/
+**/*.quarto_ipynb

@@ -33,63 +33,63 @@ library(lubridate)
 #| include: false
 
 monthly <- read_csv(
-  "../data/GA4/traffic_channel_monthly_20250701_20260630.csv",
+  "data/raw/GA4/traffic_channel_monthly_20250701_20260630.csv",
   skip = 9,
   show_col_types = FALSE
 ) %>%
   clean_names()
 
 channels <- read_csv(
-  "../data/GA4/traffic_channel_20250701_20260630.csv",
+  "data/raw/GA4/traffic_channel_20250701_20260630.csv",
   skip = 9,
   show_col_types = FALSE
 ) %>%
   clean_names()
 
 source_medium <- read_csv(
-  "../data/GA4/traffic_source_medium_20250701_20260630.csv",
+  "data/raw/GA4/traffic_source_medium_20250701_20260630.csv",
   skip = 9,
   show_col_types = FALSE
 ) %>%
   clean_names()
 
 landing <- read_csv(
-  "../data/GA4/landing_page_20250701_20260630.csv",
+  "data/raw/GA4/landing_page_20250701_20260630.csv",
   skip = 9,
   show_col_types = FALSE
 ) %>%
   clean_names()
 
 pages <- read_csv(
-  "../data/GA4/pages_screens_page_path_20250701_20260630.csv",
+  "data/raw/GA4/pages_screens_page_path_20250701_20260630.csv",
   skip = 9,
   show_col_types = FALSE
 ) %>%
   clean_names()
 
 monthly_pages <- read_csv(
-  "../data/GA4/pages_screens_page_path_month_20250701_20260630.csv",
+  "data/raw/GA4/pages_screens_page_path_month_20250701_20260630.csv",
   skip = 9,
   show_col_types = FALSE
 ) %>%
   clean_names()
 
 device <- read_csv(
-  "../data/GA4/device_category_20250701_20260630.csv",
+  "data/raw/GA4/device_category_20250701_20260630.csv",
   skip = 9,
   show_col_types = FALSE
 ) %>%
   clean_names()
 
 country <- read_csv(
-  "../data/GA4/country_20250701_20260630.csv",
+  "data/raw/GA4/country_20250701_20260630.csv",
   skip = 9,
   show_col_types = FALSE
 ) %>%
   clean_names()
 
 events <- read_csv(
-  "../data/GA4/events_20250701_20260630.csv",
+  "data/raw/GA4/events_20250701_20260630.csv",
   skip = 9,
   show_col_types = FALSE
 ) %>%
@@ -1309,7 +1309,7 @@ This supplementary analysis uses GA4 Path Exploration to examine recent website 
 #| fig-align: center
 #| fig-cap: "Navigation paths following the Science Talent Search page, 1 August–30 September 2026"
 
-knitr::include_graphics("../data/GA4/ga4_sts_path_exploration_aug_sep_2026.png")
+knitr::include_graphics("figures/ga4_sts_path_exploration_aug_sep_2026.png", error = FALSE)
 ```
 
 Using /science-talent-search/ as the starting point, the most common next-page paths included the homepage (97 events), the 2025 Awards Showcase (94), STS Resources (79), Latest News (28), My Account (26) and STS Entries (25). This indicates that users navigating beyond the main STS page frequently continued to other STS-related content, particularly the Awards Showcase and STS Resources.
@@ -1322,7 +1322,7 @@ Using /science-talent-search/ as the starting point, the most common next-page p
 #| fig-align: center
 #| fig-cap: "Navigation paths following the homepage, 1 August–30 September 2026"
 
-knitr::include_graphics("../data/GA4/ga4_homepage_path_exploration_aug_sep_2026.png")
+knitr::include_graphics("figures/ga4_homepage_path_exploration_aug_sep_2026.png", error = FALSE)
 ```
 
 
