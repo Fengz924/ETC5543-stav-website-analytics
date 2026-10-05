@@ -1,0 +1,1139 @@
+---
+title: "STAV CRM analysis report"
+subtitle: "CRM information, membership and contact management"
+date: "2026-10-02"
+number-sections: false
+toc: true
+toc-depth: 2
+execute:
+  echo: false
+  warning: false
+  message: false
+---
+
+# Executive Summary
+
+STAV’s CRM contains 6,051 records, but this is not a verified count of unique people. No exact duplicate source records, repeated CRM IDs or repeated normalised emails were detected. However, 1,379 records across 566 same-name groups are potential matches requiring review, rather than confirmed duplicates.
+
+Email, names and tags are well recorded, while organisation, phone and location information is less consistently recorded. Of the 630 records identified through school group membership plans, 189 (30.0%) have no organisation information recorded, making school-contact links a useful priority for review. The reviewed school-name mapping consolidated 544 CRM school-name variations into 250 approved schools; 160 (64.0%) have multiple CRM names. These figures describe the reviewed population rather than all schools in the CRM.
+
+Membership information is useful but does not fully establish a verified current-member population. In particular, 49 Active-status records have subscription end dates before the 29 July 2026 snapshot. Genuine active and dormant contacts cannot currently be measured because reliable interaction history and agreed engagement definitions are unavailable.
+
+STAV should prioritise reviewing potential duplicates, improving school and organisation contact links, clarifying membership information and establishing better engagement tracking.
+
+# 1 Purpose and Scope
+
+This report assesses how STAV can use its CRM for contact management, membership administration, school relationships and future engagement. It covers record counts, potential duplicates, information coverage, school-contact structure, membership information and the limits of engagement measurement.
+
+The report covers all records retained by Report 01 from the **29 July 2026 CRM export**. Report 01 handles import alignment, cleaning, missing values, parsed dates and technical preparation flags. Report 02 reads its clean CSV and presents the business analyses and interpretations.
+
+The main unit of analysis is a **CRM record**. A record, a unique identifier, a verified person, an organisation and a membership are different units. In particular, **CRM records are not a verified count of unique people**, and a recorded Active membership status does not establish an engaged relationship.
+
+All results below are calculated from the validated clean CSV. Historical report numbers are not used as analytical inputs. Contact-level details are not displayed in this report. The snapshot cannot establish today's live CRM position.
+
+**Analytical input and checks**
+
+The report uses `data/clean/CRM/restricted/crm_contacts_clean.csv`, prepared and validated by Report 01 from the 29 July 2026 export. The input checks below confirm that the expected records and fields were read successfully.
+
+```{r}
+#| label: read-validated-clean-csv
+#| echo: false
+#| code-fold: true
+library(readr)
+library(dplyr)
+library(tibble)
+
+here::i_am("reports/CRM/02_crm_analysis_report.qmd")
+knitr::opts_knit$set(root.dir = here::here())
+crm_file <- here::here("data", "clean", "CRM", "restricted", "crm_contacts_clean.csv")
+expected_record_count <- 6051L
+
+parsed_date_fields <- c(
+  "date_created_clean",
+  "date_optin_status_changed_clean",
+  "gdpr_consent_date_clean",
+  "marketing_consent_date_clean",
+  "unsub_date_clean",
+  "subscription_start_date_clean",
+  "subscription_end_date_clean",
+  "date_of_cancellation_clean",
+  "date_retired_clean",
+  "last_sponsorship_purchase_clean"
+)
+logical_fields <- c(
+  "source_multiline_record",
+  "source_quote_dialect_exception",
+  "date_parse_failure",
+  "date_parse_ambiguous",
+  "structure_issue",
+  "missing_crm_id",
+  "missing_email",
+  "duplicate_crm_id_candidate",
+  "duplicate_email_candidate",
+  "duplicate_name_candidate",
+  "email_format_valid",
+  "australian_postcode_format_valid",
+  "full_name_component_mismatch",
+  "organisation_key_missing_for_populated_name"
+)
+integer_fields <- c(
+  "source_record_number", "physical_line_start", "physical_line_end"
+)
+
+required_fields <- unique(c(
+  "id", "email_key", "company_name", "membership_status", "membership_plan",
+  parsed_date_fields, logical_fields, integer_fields
+))
+
+stopifnot(file.exists(crm_file))
+
+# Header-only inspection; does not infer analytical types or print contact values.
+source_columns <- names(read_csv(
+  crm_file, n_max = 0, col_types = cols(.default = col_character()),
+  na = "", trim_ws = FALSE, name_repair = "minimal",
+  show_col_types = FALSE, progress = FALSE
+))
+missing_fields <- setdiff(required_fields, source_columns)
+if (length(missing_fields)) {
+  stop("Required columns missing: ", paste(missing_fields, collapse = ", "))
+}
+
+column_types <- cols(.default = col_character())
+for (field in parsed_date_fields) {
+  column_types$cols[[field]] <- col_date(format = "%Y-%m-%d")
+}
+for (field in logical_fields) column_types$cols[[field]] <- col_logical()
+for (field in integer_fields) column_types$cols[[field]] <- col_integer()
+
+crm <- read_csv(
+  crm_file, col_types = column_types, na = "", trim_ws = FALSE,
+  name_repair = "minimal", show_col_types = FALSE,
+  progress = FALSE, lazy = FALSE
+)
+
+crm_parse_problems <- problems(crm)
+if (nrow(crm_parse_problems)) {
+  stop("Clean CSV has parsing problems; review Report 01 before analysing it.")
+}
+if (nrow(crm) != expected_record_count) {
+  stop("Expected ", expected_record_count, " records; found ", nrow(crm), ".")
+}
+```
+
+**Input checks:** required columns are present, the CSV has **`r nrow(crm_parse_problems)` parsing problems**, and the expected **`r format(nrow(crm), big.mark = ",")` records** were read. These checks verify the analytical input, not the real-world accuracy of each value.
+
+# 2 CRM Database Overview
+
+## 2.1 How many records do we actually have?
+
+**Business question**
+
+How many contact records are available in STAV's CRM, and how many contain organisation or membership information?
+
+**Why analyse it?**
+
+Before assessing data quality, membership or school relationships, STAV needs a clear picture of the size of its CRM and the information recorded within it.
+
+**Method**
+
+The analysis counted all records in the cleaned CRM dataset and checked how many had a CRM ID, email address, organisation, membership status or membership plan recorded.
+
+```{r}
+#| label: record-overview
+crm_record_overview <- tibble(
+  metric = c(
+    "Total CRM records",
+    "Distinct CRM IDs",
+    "Distinct normalised emails",
+    "Records with company/organisation",
+    "Records with membership status",
+    "Records with membership plan"
+  ),
+  records = c(
+    nrow(crm),
+    n_distinct(crm$id, na.rm = TRUE),
+    n_distinct(crm$email_key, na.rm = TRUE),
+    sum(!is.na(crm$company_name)),
+    sum(!is.na(crm$membership_status)),
+    sum(!is.na(crm$membership_plan))
+  ),
+  percentage_of_records = c(
+    1, NA_real_, NA_real_,
+    sum(!is.na(crm$company_name)) / nrow(crm),
+    sum(!is.na(crm$membership_status)) / nrow(crm),
+    sum(!is.na(crm$membership_plan)) / nrow(crm)
+  )
+)
+
+overview_output <- file.path("data", "analysis", "CRM", "02_analysis", "crm_record_overview.csv")
+dir.create(dirname(overview_output), recursive = TRUE, showWarnings = FALSE)
+write_csv(crm_record_overview, overview_output, na = "")
+```
+
+**Result**
+
+```{r}
+crm_record_overview |>
+  mutate(
+    records = format(records, big.mark = ",", scientific = FALSE, trim = TRUE),
+    percentage_of_records = if_else(
+      is.na(percentage_of_records), "—",
+      sprintf("%.1f%%", 100 * percentage_of_records)
+    )
+  ) |>
+  knitr::kable(
+    col.names = c("Measure", "Count", "Share of all CRM records"),
+    align = c("l", "r", "r")
+  )
+```
+
+```{r}
+#| label: fig-crm-information-coverage
+#| fig-width: 8
+#| fig-height: 3.8
+#| fig-dpi: 180
+#| fig-align: center
+#| fig-cap: "Percentages show the share of all 6,051 CRM records with each field populated. Categories overlap and are not mutually exclusive; the percentages should not be added together."
+#| fig-alt: "Horizontal bars show company or organisation information on 65.1% of CRM records, membership plan on 19.8%, and membership status on 17.2%. Categories overlap."
+library(ggplot2)
+
+# Reuse this colour and theme for later CRM charts.
+crm_chart_colour <- "#287D8E"
+crm_chart_theme <- function() {
+  theme_minimal(base_size = 12, base_family = "sans") +
+    theme(
+      panel.grid.major.y = element_blank(),
+      panel.grid.minor = element_blank(),
+      panel.grid.major.x = element_line(colour = "#E4E8EB"),
+      axis.text = element_text(colour = "#374151"),
+      plot.title = element_text(face = "bold", size = 16),
+      plot.subtitle = element_text(colour = "#596575", margin = margin(b = 14)),
+      plot.caption = element_text(hjust = 0, colour = "#596575"),
+      plot.title.position = "plot",
+      legend.position = "none",
+      plot.margin = margin(12, 24, 12, 12)
+    )
+}
+
+coverage_data <- crm_record_overview |>
+  filter(metric %in% c(
+    "Records with company/organisation",
+    "Records with membership plan",
+    "Records with membership status"
+  )) |>
+  mutate(
+    field = recode(metric,
+      "Records with company/organisation" = "Company / organisation",
+      "Records with membership plan" = "Membership plan",
+      "Records with membership status" = "Membership status"
+    ),
+    field = factor(field, levels = c(
+      "Membership status", "Membership plan", "Company / organisation"
+    )),
+    percentage_label = sprintf("%.1f%%", 100 * percentage_of_records)
+  )
+
+coverage_plot <- ggplot(
+  coverage_data, aes(x = percentage_of_records, y = field)
+) +
+  geom_col(fill = crm_chart_colour, width = 0.55) +
+  geom_text(aes(label = percentage_label), hjust = -0.15,
+            size = 4, colour = "#374151") +
+  scale_x_continuous(
+    limits = c(0, 1), breaks = seq(0, 1, 0.2),
+    labels = function(x) sprintf("%.0f%%", 100 * x),
+    expand = expansion(mult = c(0, 0.02))
+  ) +
+  labs(
+    title = "CRM information coverage",
+    subtitle = "Share of all 6,051 CRM records with each field populated",
+    x = NULL, y = NULL
+  ) +
+  crm_chart_theme()
+
+figure_dir <- file.path("reports", "figures", "CRM")
+dir.create(figure_dir, recursive = TRUE, showWarnings = FALSE)
+ggsave(
+  file.path(figure_dir, "crm_information_coverage.png"),
+  plot = coverage_plot + labs(caption = paste(
+    "Categories overlap and are not mutually exclusive;",
+    "the percentages should not be added together."
+  )),
+  width = 8, height = 3.8, dpi = 300, bg = "white"
+)
+coverage_plot
+```
+
+**Interpretation**
+
+The CRM contains 6,051 records, but this does not necessarily mean STAV has 6,051 different people. Every record has a distinct CRM ID and normalised email address, yet one person could appear in multiple records using different contact details. Potential duplicates are examined in the next section.
+
+Organisation information is recorded for 3,937 records (65.1%). Membership information is recorded for a much smaller part of the CRM: 1,041 records (17.2%) contain a membership status and 1,199 (19.8%) contain a membership plan. These are counts of contact records with information recorded, not counts of organisations, current members or memberships.
+
+**Why it matters to STAV**
+
+The CRM is broader than a membership database. It contains a mix of contacts, and only some records contain membership information. This distinction matters when STAV uses the CRM for membership reporting, school communication or audience segmentation.
+
+**Limitation**
+
+These results describe what was recorded in the July 2026 export, not whether it is correct or current. They do not establish how many unique organisations or current members are represented. Organisation and membership questions are addressed in later sections.
+
+## 2.2 How many are duplicates or potential duplicates?
+
+**Business question**
+
+Could STAV have multiple CRM records representing the same person?
+
+**Why analyse it?**
+
+Identifying possible repeated contacts helps STAV manage communication, membership information and contact history more reliably.
+
+**Method**
+
+The analysis first checked for identical source records, repeated CRM IDs and repeated normalised email addresses. It then compared first and last names to identify possible matches. Organisation and phone information were used only as supporting evidence.
+
+```{r}
+#| label: duplicate-candidate-analysis
+library(tidyr)
+library(stringr)
+
+source_records <- read_csv(
+  "data/clean/CRM/restricted/source_import/crm_source_import_internal.csv",
+  col_types = cols(.default = col_character()), na = character(),
+  trim_ws = FALSE, name_repair = "minimal",
+  show_col_types = FALSE, progress = FALSE, lazy = FALSE
+)
+stopifnot(nrow(source_records) == nrow(crm), ncol(source_records) == 71L,
+          nrow(problems(source_records)) == 0L)
+
+exact_groups <- source_records |>
+  group_by(across(everything())) |>
+  summarise(records = n(), .groups = "drop") |>
+  filter(records > 1)
+
+repeated_key_groups <- function(field) {
+  crm |>
+    filter(!is.na(.data[[field]])) |>
+    count(.data[[field]], name = "records") |>
+    filter(records > 1)
+}
+id_groups <- repeated_key_groups("id")
+email_groups <- repeated_key_groups("email_key")
+name_groups <- repeated_key_groups("name_key")
+
+duplicate_results <- tibble(
+  duplicate_check = c("Exact duplicate source records", "Same CRM ID",
+                      "Same normalised email", "Same name"),
+  affected_records = c(sum(exact_groups$records), sum(id_groups$records),
+                       sum(email_groups$records), sum(name_groups$records)),
+  groups = c(nrow(exact_groups), nrow(id_groups),
+             nrow(email_groups), nrow(name_groups)),
+  meaning = c(rep("None detected", 3), "Potential matches requiring review")
+)
+
+candidates <- crm |>
+  semi_join(name_groups, by = "name_key") |>
+  select(source_record_number, name_key, organisation_name_key,
+         mobile_phone_clean, primary_phone_clean)
+candidate_pairs <- candidates |>
+  inner_join(candidates, by = "name_key", suffix = c("_a", "_b"),
+             relationship = "many-to-many") |>
+  filter(source_record_number_a < source_record_number_b)
+
+usable_phone <- function(x) {
+  !is.na(x) & str_detect(x, "^\\+?[0-9]{8,15}$")
+}
+phone_records <- candidates |>
+  select(source_record_number, name_key, mobile_phone_clean, primary_phone_clean) |>
+  pivot_longer(c(mobile_phone_clean, primary_phone_clean), values_to = "phone") |>
+  filter(usable_phone(phone)) |>
+  distinct(source_record_number, name_key, phone)
+phone_pairs <- phone_records |>
+  inner_join(phone_records, by = c("name_key", "phone"),
+             suffix = c("_a", "_b"), relationship = "many-to-many") |>
+  filter(source_record_number_a < source_record_number_b) |>
+  distinct(source_record_number_a, source_record_number_b) |>
+  mutate(same_phone = TRUE)
+
+candidate_pairs <- candidate_pairs |>
+  left_join(phone_pairs,
+            by = c("source_record_number_a", "source_record_number_b")) |>
+  mutate(
+    same_phone = coalesce(same_phone, FALSE),
+    same_organisation = !is.na(organisation_name_key_a) &
+      !is.na(organisation_name_key_b) &
+      organisation_name_key_a == organisation_name_key_b
+  )
+
+# Each record receives its strongest observed support category.
+# Both fields must agree with the SAME partner for the final category.
+record_support <- bind_rows(
+  candidate_pairs |>
+    transmute(source_record_number = source_record_number_a,
+              same_phone, same_organisation),
+  candidate_pairs |>
+    transmute(source_record_number = source_record_number_b,
+              same_phone, same_organisation)
+) |>
+  group_by(source_record_number) |>
+  summarise(
+    both = any(same_phone & same_organisation),
+    phone = any(same_phone), organisation = any(same_organisation),
+    .groups = "drop"
+  ) |>
+  mutate(category = case_when(
+    both ~ "Name + phone and organisation",
+    phone ~ "Name + phone",
+    organisation ~ "Name + organisation",
+    TRUE ~ "Same name only"
+  ))
+review_order <- c("Same name only", "Name + organisation", "Name + phone",
+                  "Name + phone and organisation")
+review_counts <- record_support |>
+  mutate(category = factor(category, levels = review_order)) |>
+  count(category, name = "records", .drop = FALSE)
+stopifnot(
+  identical(duplicate_results$affected_records, c(0L, 0L, 0L, 1379L)),
+  identical(duplicate_results$groups, c(0L, 0L, 0L, 566L)),
+  identical(review_counts$records, c(997L, 290L, 61L, 31L)),
+  sum(review_counts$records) == sum(name_groups$records)
+)
+write_csv(duplicate_results, "data/analysis/CRM/02_analysis/crm_duplicate_summary.csv", na = "")
+write_csv(review_counts, "data/analysis/CRM/02_analysis/crm_duplicate_review_categories.csv", na = "")
+```
+
+**Result**
+
+```{r}
+duplicate_results |>
+  mutate(affected_records = format(affected_records, big.mark = ",", trim = TRUE)) |>
+  knitr::kable(
+    col.names = c("Duplicate check", "Affected records", "Groups", "Meaning"),
+    align = c("l", "r", "r", "l")
+  )
+```
+
+Affected records are records participating in matching groups, not records that should be removed.
+
+The four categories are mutually exclusive: each candidate record appears once, using its strongest observed organisation and phone support. They help prioritise manual review; they are not confirmed duplicate confidence scores. “Same name only” means no shared organisation or usable phone was found.
+
+```{r}
+#| label: fig-duplicate-support
+#| fig-width: 8
+#| fig-height: 4.2
+#| fig-dpi: 180
+#| fig-align: center
+#| fig-cap: "All 1,379 records share a first-and-last-name combination with at least one other CRM record. Organisation and phone matches provide additional evidence but do not confirm that records belong to the same person."
+#| fig-alt: "Review categories contain 997 same-name-only records, 290 with organisation support, 61 with phone support and 31 with both phone and organisation support. These are potential matches, not confirmed duplicates."
+duplicate_plot <- ggplot(
+  review_counts,
+  aes(x = records, y = factor(category, levels = rev(review_order)))
+) +
+  geom_col(fill = crm_chart_colour, width = 0.55) +
+  geom_text(aes(label = records), hjust = -0.15,
+            size = 4, colour = "#374151") +
+  scale_x_continuous(
+    limits = c(0, 1100), breaks = seq(0, 1000, 250),
+    expand = expansion(mult = c(0, 0.02))
+  ) +
+  labs(
+    title = "Potential duplicate candidates by supporting evidence",
+    subtitle = "Additional evidence can help prioritise manual review",
+    x = "Candidate records", y = NULL
+  ) +
+  crm_chart_theme()
+ggsave(
+  "reports/figures/CRM/crm_duplicate_support.png",
+  plot = duplicate_plot + labs(caption = str_wrap(
+    "All 1,379 records share a first-and-last-name combination with at least one other CRM record. Organisation and phone matches provide additional evidence but do not confirm that records belong to the same person.",
+    width = 90
+  )),
+  width = 8, height = 4.8, dpi = 300, bg = "white"
+)
+duplicate_plot
+```
+
+**Interpretation**
+
+No exact duplicate source records, repeated CRM IDs or repeated normalised emails were detected. However, this does not prove that all 6,051 CRM records represent different people: one person may have separate records using different contact details.
+
+There are 1,379 same-name candidate records across 566 groups that may require review. Most have name agreement only (997 records). A smaller number of candidate records also share organisation information (290), phone information (61), or both (31), making them useful priorities for manual review. Even the category with both phone and organisation support is not a confirmed duplicate.
+
+**Why it matters to STAV**
+
+Unresolved duplicate people could lead to repeated communications, fragmented contact history, inconsistent membership administration, overstated audience or contact counts, and an incomplete understanding of school-contact relationships. Incorrectly merging different people could create its own data-quality problems. STAV should review candidate records and confirm identity before making changes, rather than automatically deleting or merging records.
+
+**Limitation**
+
+Identical names can belong to different people; some large same-name groups demonstrate why name-only matching needs caution. Organisation and phone information may be shared, outdated or incomplete, and missing information limits confirmation. This analysis does not establish the true number of unique people, and no records should be automatically removed based on these findings.
+
+# 3 Data Quality
+
+## 3.1 How complete is the CRM data?
+
+**Business question**
+
+How consistently is useful contact information recorded in STAV's CRM?
+
+**Why analyse it?**
+
+More complete contact information helps STAV understand its audience, communicate with contacts and segment the CRM.
+
+**Method**
+
+The analysis measured the percentage of all 6,051 CRM records with information recorded in ten selected important fields.
+
+```{r}
+#| label: key-field-coverage
+coverage_fields <- tibble(
+  field = c("Email", "Full name", "Tags", "Company / organisation", "City",
+            "Preferred phone", "State / region", "Postcode",
+            "Membership plan", "Membership status"),
+  column = c("email", "full_name", "tags", "company_name", "city",
+             "preferred_phone", "region", "postal_zip",
+             "membership_plan", "membership_status")
+)
+key_coverage <- coverage_fields |>
+  mutate(
+    records_populated = vapply(column, function(field) {
+      sum(!is.na(crm[[field]]))
+    }, integer(1)),
+    coverage = records_populated / nrow(crm)
+  )
+stopifnot(identical(unname(key_coverage$records_populated),
+                   c(6051L, 5831L, 5697L, 3937L, 2068L,
+                     2047L, 1936L, 1534L, 1199L, 1041L)))
+write_csv(key_coverage, "data/analysis/CRM/02_analysis/crm_key_field_coverage.csv", na = "")
+```
+
+**Result**
+
+```{r}
+key_coverage |>
+  transmute(
+    Field = field,
+    `Records populated` = format(records_populated, big.mark = ",", trim = TRUE),
+    Coverage = sprintf("%.1f%%", 100 * coverage)
+  ) |>
+  knitr::kable(align = c("l", "r", "r"))
+```
+
+```{r}
+#| label: fig-key-crm-completeness
+#| fig-width: 8
+#| fig-height: 5.8
+#| fig-dpi: 180
+#| fig-align: center
+#| fig-cap: "Coverage shows the percentage of all 6,051 CRM records with information recorded in each field. Some fields may not apply to every contact."
+#| fig-alt: "Ten horizontal bars rank CRM information coverage from email at 100% to membership status at 17.2%. Full name and tags exceed 94%; organisation is 65.1%; other selected fields have lower coverage."
+completeness_plot <- ggplot(
+  key_coverage,
+  aes(x = coverage, y = reorder(field, coverage))
+) +
+  geom_col(fill = crm_chart_colour, width = 0.55) +
+  geom_text(
+    aes(label = sprintf("%.1f%%", 100 * coverage)),
+    hjust = -0.15, size = 4, colour = "#374151"
+  ) +
+  scale_x_continuous(
+    limits = c(0, 1), breaks = seq(0, 1, 0.2),
+    labels = function(x) sprintf("%.0f%%", 100 * x),
+    expand = expansion(mult = c(0, 0))
+  ) +
+  coord_cartesian(clip = "off") +
+  labs(title = "Completeness of key CRM information", x = NULL, y = NULL) +
+  crm_chart_theme() +
+  theme(plot.margin = margin(12, 65, 12, 12))
+ggsave(
+  "reports/figures/CRM/crm_key_information_completeness.png",
+  plot = completeness_plot + labs(caption = str_wrap(
+    "Coverage shows the percentage of all 6,051 CRM records with information recorded in each field. Some fields may not apply to every contact.",
+    width = 85
+  )),
+  width = 8, height = 6.3, dpi = 300, bg = "white"
+)
+completeness_plot
+```
+
+**Interpretation**
+
+Basic identification information is well recorded: every record has an email address, 96.4% have a full name and 94.1% have tags. Organisation information is recorded for 65.1% of records. City, preferred phone and state/region information are recorded for approximately one-third of contacts, while postcode coverage is 25.4%.
+
+Membership plan and status have lower overall coverage, at 19.8% and 17.2%. This should not automatically be interpreted as poor data quality because the CRM includes contacts who may not be members.
+
+Differences in coverage may partly reflect how contacts enter the CRM: email and names are core identifiers, while organisation, phone and location information may not be required for every contact or entry process. Lower membership-field coverage is consistent with a broader contact population rather than only members. The export cannot confirm the reasons for missing information.
+
+**Why it matters to STAV**
+
+Missing organisation, phone and location information can make it harder to understand school-contact relationships, segment audiences and target communications. Improving these fields where relevant would also give STAV a clearer picture of who it reaches and where those contacts are located.
+
+**Limitation**
+
+Coverage measures whether information is recorded, not whether it is accurate or current. Not every field is necessarily relevant to every CRM contact. Therefore, low coverage does not automatically mean poor data quality.
+
+## 3.2 How accurate and current is the CRM data?
+
+**Business question**
+
+How much can the current CRM export tell us about whether the recorded information is valid and up to date?
+
+**Why analyse it?**
+
+Accurate and current contact information helps STAV communicate reliably and maintain useful membership and school records.
+
+**Method**
+
+Several simple technical checks were used to identify obvious issues in email formats, Australian postcodes and subscription dates.
+
+```{r}
+#| label: simple-validity-checks
+is_australian <- str_to_lower(str_squish(crm$country)) %in%
+  c("australia", "au", "aus")
+validity_results <- tibble(
+  Check = c("Invalid populated email format",
+            "Australian postcode values requiring review",
+            "Subscription end date before start date"),
+  `Issues detected` = c(
+    sum(!crm$email_format_valid, na.rm = TRUE),
+    sum(is_australian & !crm$australian_postcode_format_valid, na.rm = TRUE),
+    sum(!is.na(crm$subscription_start_date_clean) &
+        !is.na(crm$subscription_end_date_clean) &
+        crm$subscription_end_date_clean < crm$subscription_start_date_clean)
+  )
+)
+stopifnot(identical(validity_results$`Issues detected`, c(0L, 12L, 0L)))
+write_csv(validity_results, "data/analysis/CRM/02_analysis/crm_simple_validity_checks.csv", na = "")
+```
+
+**Result**
+
+```{r}
+knitr::kable(validity_results, align = c("l", "r"))
+```
+
+The postcode check is limited to records identified as Australian. The 12 records are review candidates, not confirmed incorrect addresses.
+
+**Interpretation**
+
+The selected checks found few obvious technical problems. No invalid email formats or reversed subscription dates were detected, while 12 Australian postcode values warrant review.
+
+However, passing these checks does not mean the CRM information is accurate or current. For example, a correctly formatted email address may still be outdated, and a valid-looking postcode may still be incorrect.
+
+**Why it matters to STAV**
+
+Outdated or incorrect information could lead to failed communication, misdirected school correspondence and unreliable geographic or membership reporting.
+
+**Limitation / What is needed**
+
+The current export cannot reliably establish whether contact details still reach the intended person, organisation affiliations and roles are current, addresses remain current, or membership information reflects current entitlement.
+
+Future CRM processes could record a last verified date and use email delivery/bounce data, staff or contact confirmation, and authoritative membership records. Record creation and administrative update dates are not evidence that contact information has been verified.
+
+## 3.3 How consistent are school names in the CRM?
+
+**Business question**
+
+How consistently are schools named in STAV's CRM?
+
+**Why analyse it?**
+
+The same school can appear under several company names because of spelling differences, abbreviations, campus references or other naming variations. These variations can split records belonging to the same school across different CRM labels.
+
+**Method**
+
+Fuzzy text matching identified potentially related CRM school names. The A and B columns were candidate names, not correct and incorrect versions; Catie reviewed each independently to identify the school it represented, with campus information recorded separately where applicable. The results were consolidated into a school master mapping: fuzzy matching generated review candidates, while Catie’s manual review determined school identity. No records were automatically merged.
+
+```{r}
+#| label: reviewed-organisation-mapping
+organisation_master <- read_csv(
+  here::here("data", "analysis", "CRM", "organisation_mapping",
+             "organisation_master_mapping.csv"),
+  col_types = cols(.default = col_character()), na = "",
+  show_col_types = FALSE, progress = FALSE
+)
+stopifnot(all(c("approved_organization_name", "crm_names", "campuses") %in%
+                names(organisation_master)),
+          !anyNA(organisation_master$approved_organization_name),
+          !anyDuplicated(organisation_master$approved_organization_name))
+organisation_aliases <- organisation_master |>
+  select(approved_organization_name, crm_names) |>
+  separate_longer_delim(crm_names, delim = " | ") |>
+  mutate(crm_names = str_squish(crm_names)) |>
+  filter(!is.na(crm_names), crm_names != "") |>
+  distinct(approved_organization_name, crm_names)
+organisation_variants <- organisation_aliases |>
+  count(approved_organization_name, name = "name_count") |>
+  left_join(organisation_master |> select(approved_organization_name, campuses),
+            by = "approved_organization_name")
+ambiguous_aliases <- organisation_aliases |>
+  count(crm_names, name = "organisation_count") |>
+  filter(organisation_count > 1)
+mapping_summary <- tibble(
+  Measure = c("Approved schools represented in reviewed mapping",
+              "Distinct CRM school-name variations",
+              "Schools with multiple CRM names",
+              "Share of reviewed schools with multiple CRM names",
+              "Schools with campus information",
+              "Maximum CRM-name variations for one school"),
+  Result = c(as.character(nrow(organisation_master)),
+             as.character(n_distinct(organisation_aliases$crm_names)),
+             as.character(sum(organisation_variants$name_count > 1)),
+             sprintf("%.1f%%", 100 * mean(organisation_variants$name_count > 1)),
+             as.character(sum(!is.na(organisation_master$campuses))),
+             as.character(max(organisation_variants$name_count)))
+)
+variant_order <- c("1 CRM name", "2 CRM names", "3 CRM names",
+                   "4–5 CRM names", "6+ CRM names")
+variant_distribution <- organisation_variants |>
+  mutate(category = case_when(name_count == 1 ~ variant_order[1],
+                              name_count == 2 ~ variant_order[2],
+                              name_count == 3 ~ variant_order[3],
+                              name_count <= 5 ~ variant_order[4],
+                              TRUE ~ variant_order[5])) |>
+  count(category, name = "organisations")
+stopifnot(sum(variant_distribution$organisations) == nrow(organisation_master))
+write_csv(mapping_summary, "data/analysis/CRM/02_analysis/crm_organisation_mapping_summary.csv")
+write_csv(variant_distribution, "data/analysis/CRM/02_analysis/crm_organisation_name_distribution.csv")
+
+# Campus QA is a review queue, not a correction to the master mapping.
+campus_values <- organisation_master |>
+  filter(!is.na(campuses)) |>
+  select(approved_organization_name, campuses) |>
+  separate_longer_delim(campuses, delim = " | ") |>
+  mutate(campus_key = str_to_lower(str_squish(campuses))) |>
+  distinct()
+campus_case <- campus_values |>
+  group_by(approved_organization_name, campus_key) |>
+  filter(n_distinct(campuses) > 1) |> ungroup() |>
+  transmute(approved_organization_name, campus = campuses,
+            reason = "Capitalisation/spacing variants within school")
+campus_notes <- campus_values |>
+  filter(str_detect(campuses, regex("\\bCHECK\\b", ignore_case = TRUE))) |>
+  transmute(approved_organization_name, campus = campuses,
+            reason = "Review instruction appears in campus field")
+campus_pairs <- campus_values |>
+  inner_join(campus_values, by = "approved_organization_name",
+             suffix = c("_a", "_b"), relationship = "many-to-many") |>
+  filter(campuses_a < campuses_b, campus_key_a != campus_key_b,
+         nchar(campus_key_a) >= 5, nchar(campus_key_b) >= 5) |>
+  rowwise() |>
+  mutate(distance = as.integer(adist(campus_key_a, campus_key_b)[1])) |>
+  ungroup() |> filter(distance <= 2,
+    !(campus_key_a %in% c("junior", "senior") &
+        campus_key_b %in% c("junior", "senior"))) |>
+  transmute(approved_organization_name,
+            campus = paste(campuses_a, campuses_b, sep = " | "),
+            reason = "Similar campus spellings within school; confirm manually")
+campus_qa <- bind_rows(campus_case, campus_notes, campus_pairs) |> distinct()
+write_csv(campus_qa, "data/analysis/CRM/02_analysis/crm_campus_review_candidates.csv")
+
+example_organisations <- c("Waverley Christian College", "Caulfield Grammar School",
+                           "Haileybury College")
+organisation_examples <- organisation_variants |>
+  filter(approved_organization_name %in% example_organisations) |>
+  rowwise() |>
+  mutate(example_names = {
+    aliases <- organisation_aliases$crm_names[
+      organisation_aliases$approved_organization_name == approved_organization_name]
+    chosen <- head(unique(c(intersect(approved_organization_name, aliases), aliases)), 3)
+    paste0(paste(chosen, collapse = "; "),
+           if (length(aliases) > 3) "; additional variants recorded" else "")
+  }) |> ungroup() |>
+  arrange(match(approved_organization_name, example_organisations)) |>
+  transmute(`Approved school` = approved_organization_name,
+            `CRM name variations` = name_count,
+            `Example CRM names` = example_names,
+            `Recorded campuses` = coalesce(campuses, "Not recorded"))
+write_csv(organisation_examples, "data/analysis/CRM/02_analysis/crm_organisation_mapping_examples.csv")
+```
+
+**Result**
+
+The reviewed mapping contains **`r mapping_summary$Result[1]` approved schools** derived from **`r mapping_summary$Result[2]` distinct CRM school-name variations**. These schools represent the reviewed mapping population, not the total number of schools in the full CRM.
+
+```{r}
+knitr::kable(mapping_summary, align = c("l", "r"))
+```
+
+```{r}
+#| label: fig-organisation-name-variations
+#| fig-width: 8
+#| fig-height: 4.6
+#| fig-dpi: 180
+#| fig-cap: "CRM name variations per approved school in the reviewed mapping population. These counts do not describe all schools in the CRM."
+#| fig-alt: "Horizontal bars show the number of reviewed schools with one, two, three, four to five, or six or more CRM names."
+organisation_variation_plot <- ggplot(variant_distribution,
+  aes(x = organisations, y = factor(category, levels = rev(variant_order)))) +
+  geom_col(fill = crm_chart_colour, width = 0.55) +
+  geom_text(aes(label = organisations), hjust = -0.15,
+            size = 4, colour = "#374151") +
+  scale_x_continuous(expand = expansion(mult = c(0, 0.12))) +
+  labs(title = "CRM name variations per approved school",
+       x = "Approved schools", y = NULL) +
+  crm_chart_theme()
+organisation_variation_plot
+ggsave("reports/figures/CRM/crm_organisation_name_variations.png",
+       organisation_variation_plot, width = 8, height = 4.6, dpi = 300)
+```
+
+The examples show a few observed names, rather than every variation. Waverley Christian College remains one approved school in the mapping even where names refer to its Wantirna South and Narre Warren South campuses. Campus values are reproduced as recorded and still require validation; campuses are not counted as separate schools.
+
+```{r}
+knitr::kable(organisation_examples, align = c("l", "r", "l", "l"))
+```
+
+**Interpretation**
+
+The reviewed mapping shows substantial inconsistency in school naming: **`r mapping_summary$Result[3]` of the `r mapping_summary$Result[1]` approved schools (`r mapping_summary$Result[4]`)** have multiple CRM names. School data quality concerns both whether a name is recorded, as assessed in Section 3.1, and whether records referring to the same school use a consistent name. Without standardisation, contacts from the same school may be distributed across several CRM company names. These findings describe the reviewed population only.
+
+**Why it matters to STAV**
+
+Standardising school names helps bring together contacts belonging to the same school, Group Admins, Group Members, membership information and campuses. The reviewed school master mapping is intended to support later school-level CRM analysis once ambiguous names and campus details have been checked.
+
+**Limitation**
+
+The mapping covers schools included in the fuzzy-matching and manual-review process, not a complete register of all schools in the CRM. Fuzzy similarity identified candidates; final school identification was based on Catie’s manual review. **`r nrow(ambiguous_aliases)` CRM names map to more than one approved school name** and require further review before automatic linking. Campus information contains spelling, capitalisation and review-note issues requiring final validation and standardisation. Section 4 retains its existing CRM organisation-key grouping.
+
+# 4 School Membership and Contact Structure
+
+## 4.1 How many records are identified through school membership plans?
+
+**Business question**
+
+How many CRM records can be identified through a school group membership plan?
+
+**Method**
+
+Records were identified using Primary School – Group Membership, Secondary School – Group Membership and P-12 School – Group Membership plans. Dash and spacing variations were standardised. Membership status was not used to filter the population.
+
+```{r}
+#| label: school-plan-population
+normalise_school_plan <- function(x) {
+  str_to_lower(str_squish(x)) |>
+    str_replace_all("\\s*[–—-]\\s*", "-")
+}
+school_plan_values <- c(
+  "primary school-group membership",
+  "secondary school-group membership",
+  "p-12 school-group membership"
+)
+crm_school_roles <- crm |>
+  mutate(
+    school_plan_key = normalise_school_plan(membership_plan),
+    has_school_plan = school_plan_key %in% school_plan_values,
+    role_tags = str_to_upper(coalesce(tags, "")),
+    is_group_admin = str_detect(role_tags, fixed("[GROUP ADMIN]")),
+    is_group_member = str_detect(role_tags, fixed("[GROUP MEMBER]")),
+    school_specific_role_tag = str_detect(
+      role_tags,
+      "\\[GROUP (ADMIN|MEMBER)\\] (PRIMARY SCHOOL|SECONDARY SCHOOL|P-12 SCHOOL)"
+    ),
+    group_role = case_when(
+      is_group_admin & is_group_member ~ "Both",
+      is_group_admin ~ "Group Admin only",
+      is_group_member ~ "Group Member only",
+      TRUE ~ "Neither"
+    )
+  )
+school_contacts <- filter(crm_school_roles, has_school_plan)
+school_population <- tibble(
+  measure = "Records identified through a school group membership plan",
+  records = nrow(school_contacts),
+  share = nrow(school_contacts) / nrow(crm)
+)
+stopifnot(nrow(school_contacts) == 630L)
+write_csv(school_population, "data/analysis/CRM/02_analysis/crm_school_plan_population.csv", na = "")
+```
+
+**Result**
+
+There are **630 records identified through a school group membership plan**, representing **10.4% of all 6,051 CRM records**.
+
+The membership plan provides the clearest available evidence of membership type. This is an analytical definition, rather than an authoritative STAV business rule, and does not establish current membership.
+
+## 4.2 What group roles are recorded among school membership contacts?
+
+Group roles were identified from recorded Group Admin and Group Member tags within the 630-record school-plan population.
+
+```{r}
+#| label: school-contact-roles
+school_role_order <- c("Group Admin only", "Group Member only", "Both", "Neither")
+school_role_summary <- school_contacts |>
+  mutate(group_role = factor(group_role, levels = school_role_order)) |>
+  count(group_role, name = "records", .drop = FALSE) |>
+  mutate(share = records / nrow(school_contacts))
+stopifnot(
+  identical(school_role_summary$records, c(178L, 230L, 139L, 83L)),
+  sum(school_role_summary$records) == nrow(school_contacts),
+  sum(school_contacts$is_group_admin) == 317L
+)
+write_csv(school_role_summary, "data/analysis/CRM/02_analysis/crm_school_contact_roles.csv", na = "")
+school_role_summary |>
+  transmute(`Recorded group role` = group_role, Records = records,
+            Share = sprintf("%.1f%%", 100 * share)) |>
+  knitr::kable(align = c("l", "r", "r"))
+```
+
+Each record appears in one category. The counts total 630; displayed percentages may not total 100% because of rounding.
+
+```{r}
+#| label: fig-school-contact-roles
+#| fig-width: 8
+#| fig-height: 4.2
+#| fig-dpi: 180
+#| fig-align: center
+#| fig-cap: "Roles are based on recorded Group Admin and Group Member tags among 630 contacts with a school group membership plan. Missing tags do not necessarily mean no role exists."
+#| fig-alt: "Group Admin only: 178 records, 28.3%; Group Member only: 230, 36.5%; Both: 139, 22.1%; Neither: 83, 13.2%."
+school_role_plot <- ggplot(
+  school_role_summary,
+  aes(x = records, y = factor(group_role, levels = rev(school_role_order)))
+) +
+  geom_col(fill = crm_chart_colour, width = 0.55) +
+  geom_text(
+    aes(label = sprintf("%d (%.1f%%)", records, 100 * share)),
+    hjust = -0.15, size = 4, colour = "#374151"
+  ) +
+  scale_x_continuous(limits = c(0, 310), breaks = seq(0, 300, 100),
+                     expand = expansion(mult = c(0, 0.02))) +
+  labs(title = "Group roles among school membership contacts",
+       x = "CRM records", y = NULL) +
+  crm_chart_theme()
+ggsave(
+  "reports/figures/CRM/crm_school_contact_roles.png",
+  plot = school_role_plot + labs(caption = str_wrap(
+    "Roles are based on recorded Group Admin and Group Member tags among 630 contacts with a school group membership plan. Missing tags do not necessarily mean no role exists.",
+    width = 85
+  )),
+  width = 8, height = 4.8, dpi = 300, bg = "white"
+)
+school_role_plot
+```
+
+**Interpretation**
+
+Group Member only is the largest category. A total of 317 records have a Group Admin role, either alone or together with a Group Member role. The 83 records with neither recognised role tag may be useful to review where a role should be recorded; they do not necessarily lack a real role.
+
+## 4.3 Are school-contact relationships clearly recorded?
+
+The analysis checked organisation information on school-plan records and the role structure of linked organisation groups. For the organisation-level checks, all CRM contacts linked to those organisation keys were considered, so an administrator was not missed simply because their own record lacked a school plan.
+
+```{r}
+#| label: school-organisation-links
+school_organisation_keys <- school_contacts |>
+  filter(!is.na(organisation_name_key)) |>
+  distinct(organisation_name_key)
+school_linked_organisations <- crm_school_roles |>
+  semi_join(school_organisation_keys, by = "organisation_name_key") |>
+  group_by(organisation_name_key) |>
+  summarise(admins = sum(is_group_admin), members = sum(is_group_member),
+            .groups = "drop")
+school_link_issues <- tibble(
+  finding = c(
+    "School-plan records without organisation information",
+    "Organisation groups with Group Members but no identifiable Group Admin",
+    "Organisation groups with multiple identifiable Group Admins"
+  ),
+  count = c(
+    sum(is.na(school_contacts$company_name)),
+    sum(school_linked_organisations$members > 0 &
+          school_linked_organisations$admins == 0),
+    sum(school_linked_organisations$admins > 1)
+  )
+)
+school_tags_without_plan <- sum(
+  crm_school_roles$school_specific_role_tag & !crm_school_roles$has_school_plan
+)
+stopifnot(identical(school_link_issues$count, c(189L, 40L, 16L)),
+          school_tags_without_plan == 75L)
+write_csv(school_link_issues, "data/analysis/CRM/02_analysis/crm_school_contact_link_review.csv", na = "")
+```
+
+- **189 of the 630 school-plan records (30.0%)** have no organisation information recorded.
+- **40 organisation groups based on the CRM organisation key** have Group Members but no identifiable Group Admin.
+- **16 organisation groups** have multiple identifiable Group Admins.
+
+No identifiable administrator may reflect missing CRM information rather than a real absence. Multiple administrators may be legitimate. These findings identify records and groups worth reviewing, not confirmed errors.
+
+These patterns may reflect incomplete organisation links, missing or outdated role tags, changes in school contacts, or membership and organisation information being maintained separately. An administrator could also be recorded elsewhere without a consistent link to the same organisation. The export cannot determine which explanation applies.
+
+**Why it matters to STAV**
+
+Clearer organisation and role links can help STAV identify the appropriate school membership contact, communicate with schools more reliably, understand who administers and participates in group memberships, and maintain clearer school-contact relationships.
+
+**Limitation**
+
+The plan-based definition is analytical, not authoritative. There are 75 records with school-specific group-role tags but no school membership plan, so it may not capture every school-related contact. Counts represent CRM records, not verified people, schools or current memberships. Organisation keys are practical grouping tools, not authoritative school identifiers.
+
+# 5 Membership Analysis
+
+## 5.1 What membership information is recorded?
+
+**Business question**
+
+What membership status and membership plan information is recorded in the CRM?
+
+**Method**
+
+Recorded statuses and plans were counted after combining obvious case and spacing variations in status, and dash and spacing variations in plans.
+
+```{r}
+#| label: membership-summary
+membership_data <- crm |>
+  mutate(
+    status_key = str_replace_all(str_to_lower(str_squish(membership_status)),
+                                 "[ –—-]+", "-"),
+    plan_key = str_replace_all(str_squish(membership_plan),
+                               "\\s*[–—-]\\s*", "-")
+  )
+status_counts <- membership_data |> filter(!is.na(status_key)) |>
+  count(status_key, name = "records")
+status_order <- c("Active", "On-hold", "Expired", "Other")
+status_chart_data <- membership_data |> filter(!is.na(status_key)) |>
+  mutate(status = case_when(status_key == "active" ~ "Active",
+                            status_key == "on-hold" ~ "On-hold",
+                            status_key == "expired" ~ "Expired",
+                            TRUE ~ "Other")) |>
+  count(status, name = "records") |>
+  mutate(share = records / sum(records))
+stopifnot(sum(status_counts$records) == 1041L,
+          status_counts$records[match(c("active", "on-hold", "expired", "cancelled",
+                                       "pending-cancel", "paused", "pending"),
+                                     status_counts$status_key)] == c(632,250,127,26,3,2,1),
+          status_chart_data$records[match(status_order, status_chart_data$status)] ==
+            c(632,250,127,32))
+plan_counts <- membership_data |> filter(!is.na(plan_key)) |>
+  mutate(plan = case_when(
+    plan_key %in% c("Laboratory Technician", "Life Membership", "Retired Teacher") ~
+      "Other plans",
+    TRUE ~ str_replace_all(plan_key, "-Group Membership", " – Group Membership")
+  )) |> count(plan, name = "records", sort = TRUE)
+stopifnot(sum(plan_counts$records) == 1199L,
+          plan_counts$records[plan_counts$plan == "Other plans"] == 23L)
+write_csv(status_counts, "data/analysis/CRM/02_analysis/crm_membership_status_counts.csv")
+write_csv(status_chart_data, "data/analysis/CRM/02_analysis/crm_membership_status_chart.csv")
+write_csv(plan_counts, "data/analysis/CRM/02_analysis/crm_membership_plan_counts.csv")
+```
+
+**Result**
+
+Membership status is recorded for **1,041 CRM records**, and membership plan for **1,199 records**. These are record counts, not verified membership counts.
+
+```{r}
+#| label: membership-status-figure
+#| fig-width: 8
+#| fig-height: 4.3
+#| fig-dpi: 180
+#| fig-cap: "Percentages are based on the 1,041 CRM records with a recorded membership status. These are recorded statuses, not verified current memberships."
+#| fig-alt: "Recorded membership statuses: Active 632, On-hold 250, Expired 127, Other 32."
+membership_status_plot <- ggplot(status_chart_data,
+  aes(x = records, y = factor(status, levels = rev(status_order)))) +
+  geom_col(fill = crm_chart_colour, width = 0.55) +
+  geom_text(aes(label = sprintf("%d (%.1f%%)", records, 100 * share)),
+            hjust = -0.15, size = 4, colour = "#374151") +
+  scale_x_continuous(limits = c(0, 820), breaks = seq(0, 800, 200),
+                     expand = expansion(mult = c(0, 0.02))) +
+  labs(title = "Recorded membership status", x = "CRM records", y = NULL) +
+  crm_chart_theme()
+membership_status_plot
+ggsave("reports/figures/CRM/crm_membership_status.png",
+       membership_status_plot + labs(caption = str_wrap(
+         "Percentages are based on the 1,041 CRM records with a recorded membership status. These are recorded statuses, not verified current memberships.",
+         width = 85)), width = 8, height = 4.8, dpi = 300)
+```
+
+Other statuses comprise Cancelled (26), Pending-cancel (3), Paused (2) and Pending (1).
+
+```{r}
+#| label: membership-plan-table
+knitr::kable(plan_counts |> transmute(`Membership plan` = plan, Records = records),
+             format.args = list(big.mark = ","), align = c("l", "r"))
+```
+
+**Interpretation**
+
+Active is the most commonly recorded status. School group memberships form an important part of the recorded plans, alongside individual teacher, professional and organisation membership types. Plan labels alone do not establish current entitlement.
+
+## 5.2 Are the membership records consistent?
+
+```{r}
+#| label: membership-review-table
+membership_review <- tibble(
+  `Review indicator` = c(
+    "Membership plan recorded but no membership status",
+    "Membership status recorded but no membership plan",
+    "Active status with subscription end date before 29 July 2026"),
+  Records = c(
+    sum(!is.na(membership_data$plan_key) & is.na(membership_data$status_key)),
+    sum(!is.na(membership_data$status_key) & is.na(membership_data$plan_key)),
+    sum(membership_data$status_key == "active" &
+          membership_data$subscription_end_date_clean < as.Date("2026-07-29"),
+        na.rm = TRUE)))
+stopifnot(membership_review$Records == c(176L,18L,49L))
+write_csv(membership_review, "data/analysis/CRM/02_analysis/crm_membership_review_indicators.csv")
+knitr::kable(membership_review, align = c("l", "r"))
+```
+
+These are review candidates, not confirmed errors. Missing membership information may be legitimate for some CRM contacts. The 49 Active-status records with an earlier end date are particularly useful to review because the recorded status and subscription date do not clearly align. These indicators may overlap and should not be added together.
+
+Possible explanations include fields being updated at different times or through different processes, or historical values remaining after a membership change or renewal. An Active status with an earlier end date may indicate that status and subscription dates have not been updated together. The export cannot establish the workflow behind these differences.
+
+## 5.3 Can current membership be reliably identified?
+
+The current CRM export does not fully establish a verified current-member population. Recorded Active status is useful, but some Active records have subscription end dates before the snapshot, some membership records lack status, plan or dates, and the authoritative source and business rules for entitlement have not been confirmed.
+
+**Recorded Active membership status should not be interpreted as evidence that a contact is actively engaged with STAV.**
+
+STAV would need an agreed authoritative membership source, clear rules for status and subscription dates, and consistent updating of membership information to report current membership more reliably.
+
+**Why it matters to STAV**
+
+Clearer membership information would support renewal administration, membership communication and reliable current-member reporting.
+
+**Limitation**
+
+This analysis uses the 29 July 2026 CRM snapshot. Counts represent CRM records, not verified people or membership entitlements. Missing or conflicting fields do not automatically mean a record is incorrect.
+
+# 6 Contact Activity and Dormancy
+
+## 6.1 Can a Last Contact Date be identified?
+
+The current CRM export does not contain a reliable field that can be interpreted as a contact’s Last Contact Date. Record creation, administrative updates, membership status changes and subscription dates are not substitutes for actual contact or interaction history.
+
+A reliable measure would need dated evidence such as email or communication history, event interactions, CRM notes documenting contact, or other meaningful engagement records linked to the contact.
+
+The available export mainly describes contact and membership information and does not provide a complete dated interaction history. A lack of recorded recent activity therefore cannot be interpreted as evidence that a contact is dormant.
+
+## 6.2 How many contacts are genuinely active?
+
+**Not currently measurable from the available CRM export.**
+
+STAV would need to agree on what counts as meaningful engagement and over what period. This might include event participation, email interaction, membership activity or direct contact, supported by dated evidence. Recorded Active membership status does not establish active engagement.
+
+## 6.3 How many contacts are dormant?
+
+**Not currently measurable from the available CRM export.**
+
+STAV would first need a reliable interaction history, an agreed definition of meaningful activity and an agreed inactivity period. No dormancy threshold or contact classification has been assigned in this report.
+
+# 7 Key Business Findings
+
+1. **CRM scale:** The CRM contains 6,051 records. This is not a verified count of different people.
+2. **Potential duplicates:** No exact duplicate source records, repeated CRM IDs or repeated normalised emails were detected. However, 1,379 records across 566 same-name groups are potential matches requiring review, not confirmed duplicates.
+3. **Information coverage:** Email, names and tags are well recorded. Organisation, phone and location information is less consistently recorded, limiting audience segmentation and understanding of contact relationships.
+4. **School-contact structure:** There are 630 records identified through school group membership plans; 189 (30.0%) lack organisation information. Recorded group roles and organisation links identify relationships worth reviewing rather than confirmed errors. The reviewed school-name mapping consolidated 544 CRM school-name variations into 250 approved schools, of which 160 (64.0%) have multiple names. This reviewed population shows how naming variations can fragment school-level contact and membership information.
+5. **Membership information:** Recorded membership fields are useful but do not fully establish a verified current-member population. The 49 Active-status records with subscription end dates before the snapshot provide a practical review population.
+6. **Engagement:** Genuine active and dormant contact populations cannot currently be measured because reliable interaction history and agreed definitions are unavailable.
+
+# 8 Recommendations
+
+1. **Review potential duplicate people.** Prioritise same-name candidates with supporting organisation or phone evidence. Confirm identity before merging records; do not merge automatically.
+2. **Improve organisation and school-contact links.** Prioritise school-plan records missing organisation information and confirm Group Admin and Group Member roles where needed. Maintain the reviewed school-name master mapping to standardise names before school-level analysis of contacts, group roles and membership information. Do not automatically link the nine ambiguous CRM names until they are resolved, and validate campus information.
+3. **Review membership inconsistencies.** Start with Active-status records whose subscription end dates precede the snapshot, then clarify records with plan or status gaps.
+4. **Establish clearer membership data rules.** Agree on the authoritative source for entitlement and how membership status, plan and subscription dates should be maintained.
+5. **Improve engagement tracking.** Establish a reliable Last Contact or Last Interaction measure and agree on meaningful engagement before defining active and dormant contacts.
+
+# 9 Conclusion
+
+STAV’s CRM contains useful information for communication, membership administration and school relationships. The main opportunity is to improve consistency, organisation-contact links and clarity around membership information, alongside filling relevant information gaps.
+
+Contact engagement and dormancy cannot yet be measured reliably. Better interaction tracking and agreed membership and engagement definitions would make future CRM reporting and decision-making more dependable.

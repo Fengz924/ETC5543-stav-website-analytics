@@ -1,0 +1,196 @@
+---
+title: "STAV CRM — data preparation and validation"
+subtitle: "Report 01: reproducible source alignment and analysis dataset"
+date: "2026-10-02"
+execute:
+  echo: false
+  warning: false
+  message: false
+---
+
+```{r}
+#| label: prepare-and-validate
+here::i_am("reports/CRM/01_crm_data_preparation.qmd")
+knitr::opts_knit$set(root.dir = here::here())
+source(here::here("R", "CRM", "prepare_crm.R"), chdir = FALSE)
+aggregate_table <- function(filename) {
+  readr::read_csv(file.path("data/analysis/CRM/01_preparation",filename),
+                 show_col_types=FALSE) |> knitr::kable()
+}
+```
+
+# Purpose and scope
+
+**Purpose.** Create a reproducible, validated contact-level dataset for subsequent CRM reports. This report establishes source alignment and preparation quality; it does not classify members, reconcile membership, or define active/dormant relationships.
+
+**Method.** Read an unchanged local copy of the CRM export dated **29 July 2026**. Preserve source values and logical source record numbers, validate parsing independently, apply documented text cleaning, add comparison/date/validation variables, and verify saved datasets. The reference project supplies evidence only. No GA4 content is used.
+
+**Validation result.** Preparation passed its blocking checks: **`r nrow(crm)` records**, **71 source fields** and **`r ncol(crm)` final analysis fields**. Review flags identify values needing attention; they are not automatic correction or business decisions.
+
+**Why it matters.** Later counts, membership summaries and school relationships depend on records staying aligned with the correct source fields. A plausible-looking row count alone cannot establish that alignment.
+
+# Source data
+
+**Purpose.** Preserve a traceable source snapshot without exposing personal details in the rendered report.
+
+**Method.** The raw copy is `data/raw/CRM/CRM20260729.csv`. Its SHA-256 is checked against `docs/CRM/source_contract.json` on every run. The original reference CSV is never edited. The source has 71 declared fields; fields are initially read as text so identifiers, phone numbers and dates are not changed by automatic guessing.
+
+**Validation result.** The source checksum matches the audited export. Exact header names and order are recorded in `data/analysis/CRM/01_preparation/validation/source_field_inventory.csv`; checksum, source byte count, parser versions and import results are in `data/analysis/CRM/01_preparation/validation/source_manifest.json`. No contact values are printed here.
+
+**Why it matters.** A changed source invalidates the previous contract and requires a deliberate new source review rather than silently refreshing unrelated findings. `source_record_number` counts logical records, excluding the header; multiline records are not counted as additional contacts.
+
+# Import validation and the 3-versus-59 discrepancy
+
+**Purpose.** Resolve contradictory parser diagnostics before trusting any downstream values.
+
+**Method.** The investigation checks delimiter/quote behaviour using the old R dialect, default Python CSV parsing, explicit backslash-aware Python and R parsing, and a strict literal-preserving state machine. It also checks physical line spans, per-record field widths, all nested notes JSON, and exact cross-language round trips.
+
+The export contains two kinds of quotes inside quoted JSON notes:
+
+- doubled CSV quotes, which decode to a single quote;
+- a literal backslash followed by an embedded quote, which must remain part of the JSON content rather than ending the CSV field.
+
+The original Python inspection used its default quote rules without a backslash rule. Its permissive parser split **59 logical records** into too many fields; strict default parsing rejects the syntax. The old R `read_csv()` configuration did not enable backslash escapes. Its more permissive handling tolerated many such sequences but reported **3 problem records**. These are different parser responses to the same export dialect, not two authoritative counts of corrupt contacts.
+
+Enabling backslash escaping in both parsers yields 6,051 records with 71 fields and zero parser problems. However, that option consumes literal backslashes in cell values, altering nested JSON/text. It is therefore used only as an independent boundary check, not as the accepted source-value import.
+
+The accepted parser decodes doubled CSV quotes, **preserves literal backslash-quote content**, rejects malformed quote boundaries, and retains embedded newlines. It writes a canonical CSV using standard doubled quotes. Python and R then re-read that canonical CSV without backslash consumption and compare every decoded cell exactly. The original raw CSV remains unchanged.
+
+**Validation result.**
+
+```{r}
+aggregate_table("crm_parser_comparison.csv")
+aggregate_table("crm_import_validation.csv")
+```
+
+Every accepted logical record has exactly 71 fields. All 6,051 notes values validate as JSON lists. The five multiline records contain embedded newlines in `company_address`; these are legitimate quoted values. Quoted commas elsewhere are retained as field content. Independent R and Python boundary checks have no disagreements after explicitly accounting for their consuming-backslash semantics, and both canonical round trips preserve every cell exactly.
+
+**Why it matters.** Parser warnings alone missed some nonstandard quoting behaviour. The accepted import does not truncate extra fields, drop records, or blank the three previously flagged rows. Correctly decoded source values are retained. The old quarantine strategy is replaced by this verified import, so later results must be recomputed from the new dataset rather than assumed to match old outputs.
+
+# Cleaning
+
+**Purpose.** Standardise genuine blanks and comparison inputs while preserving auditability and free-text content.
+
+**Method.**
+
+1. Standardise column names using `janitor::clean_names()` and check uniqueness.
+2. Squish whitespace in ordinary fields. In JSON notes and specified free-text fields, trim edges only; preserve internal whitespace, escapes and line breaks.
+3. Convert empty/whitespace values to missing.
+4. Convert a standalone case-insensitive `No` to missing only in the explicitly listed fields reused from the reference preparation. Genuine yes/no response fields retain their values. This placeholder list remains a business assumption requiring confirmation.
+5. Retain exact decoded originals for identity, names, email, company name and all ten date fields. The canonical import retains all 71 original decoded fields.
+6. Parse dates into separate `_clean` columns. Source dates and `_original` copies remain available. Known Australian state names receive standard abbreviations; other region values remain distinguishable.
+
+**Validation result.** The cleaning log records changed, blank-to-missing and placeholder-to-missing counts per field. No source records are removed.
+
+```{r}
+cleaning_changes |>
+  summarise(
+    source_fields= n(),
+    field_values_changed=sum(records_changed),
+    blank_values_to_missing=sum(blank_to_missing),
+    no_placeholders_to_missing=sum(no_placeholder_to_missing)
+  ) |> knitr::kable()
+```
+
+Counts above describe field values, not distinct contacts. The complete aggregate log is `data/analysis/CRM/01_preparation/crm_cleaning_log.csv`.
+
+**Why it matters.** Consistent missing-value rules make later completeness measurements reproducible. Original values remain accessible for resolving questionable transformations. Preserving JSON/free-text content avoids losing evidence before a business interpretation is agreed.
+
+# Derived analysis variables
+
+**Purpose.** Supply reusable comparison and validation fields without making later-report business decisions.
+
+**Method.** The dataset contains:
+
+| Family | Fields and rule |
+|---|---|
+| Source audit | `source_record_number`, physical line start/end, multiline and resolved quoting-dialect flags |
+| Email/name matching | `email_key`, first/last name keys, `name_key`; standardised strings, candidate matching only |
+| Organisation matching | `organisation_name_key`; case/spacing/punctuation cleaning, not an approved organisation identifier |
+| Phone preparation | Clean mobile and primary phones; `preferred_phone` uses mobile first, primary second |
+| Location preparation | `suburb_candidate` copies city provisionally; `region_clean`; `postal_zip_clean` retains invalid characters for review |
+| Dates | Ten parsed `_clean` dates; failed parsing and ambiguous day/month flags |
+| Technical validation | Missing ID/email, duplicate candidates, email syntax, four-digit postcode format, comparable name mismatch and lost organisation-key flags |
+
+No membership-tag priority, School Member category, membership reconciliation, organisation membership status, Last Contact Date, Active or Dormant classification is created.
+
+Dates use the reference format family: ISO first, followed by day-first and month-first formats, then written month formats. Parsing uses `Australia/Melbourne` and produces dates, discarding time-of-day only in derived fields. Numeric dates with two distinct components both between 1 and 12 are explicitly flagged as ambiguous.
+
+**Validation result.**
+
+```{r}
+aggregate_table("crm_date_parse_validation.csv")
+```
+
+The complete `docs/CRM/crm_field_dictionary.csv` defines every field, its source/derived role, type, transformation, missing-value convention and privacy classification. Generic source fields whose precise business meaning is unverified are labelled accordingly.
+
+**Why it matters.** Matching keys assist later review but do not establish identity. Parseability does not prove that a date is correct. Administrative dates are not substituted for contact activity.
+
+# Validation after cleaning
+
+**Purpose.** Establish a usable preparation contract and separate pipeline failures from reviewable source values.
+
+**Method.** Blocking checks verify row preservation, all source columns, unique sequential source numbers, exact original audit copies, source alignment, canonical parsing and saved-output round trips. Review checks flag ambiguous/unparseable dates and organisation-key loss. Field-format and duplicate flags remain review evidence and do not remove records.
+
+**Validation result.**
+
+```{r}
+aggregate_table("crm_post_cleaning_validation.csv")
+aggregate_table("crm_preparation_flag_summary.csv")
+```
+
+Flag populations can overlap and must not be summed into a unique-contact total. A postcode flag checks a four-digit Australian format; it does not prove address accuracy or that the Australian rule applies to every record. Email validity checks syntax only. Review records are saved exclusively in a restricted output folder.
+
+**Why it matters.** Later reports can distinguish a failed data pipeline from known limitations in usable source data. Preparation flags must not be mistaken for confirmed duplicate people, incorrect source values or business eligibility decisions.
+
+# Output datasets and downstream contract
+
+**Purpose.** Give subsequent CRM reports a single authoritative prepared input with a visible validation gate.
+
+**Method.** Final datasets are written only after blocking preparation checks pass. Each rerun invalidates previous final datasets and the preparation-success marker before processing. On success, saved CSV/RDS outputs are re-read and validated.
+
+**Validation result.**
+
+```{r}
+aggregate_table("crm_output_summary.csv")
+```
+
+| Output | Role |
+|---|---|
+| `data/raw/CRM/CRM20260729.csv` | Byte-identical source copy; never edited |
+| `data/clean/CRM/restricted/source_import/crm_source_import_internal.csv` | Canonical exact decoded 71-field source import |
+| `data/clean/CRM/restricted/source_import/crm_source_record_map_internal.csv` | Logical record and physical line traceability |
+| `data/clean/CRM/restricted/source_import/crm_contacts_analysis_internal.rds` | Optional R convenience copy: retains dates, logical flags, missingness and exact original empty strings; Report 02 does not depend on it |
+| `data/clean/CRM/restricted/crm_contacts_clean.csv` | **Primary input for Report 02**: explicit column types are assigned on import; empty fields represent missing values |
+| `data/analysis/CRM/01_preparation/restricted/crm_preparation_review_internal.csv` | Contact-level technical review candidates |
+| `data/analysis/CRM/01_preparation/restricted/crm_import_dialect_review_internal.csv` | Source numbers and diagnostic metadata for the resolved quote anomalies |
+| `data/analysis/CRM/01_preparation/` | Aggregate import, parser, cleaning, date, flag, output and post-cleaning summaries |
+| `docs/CRM/crm_field_dictionary.csv` | Complete field contract |
+| `data/analysis/CRM/01_preparation/validation/preparation_passed.json` | Required success marker with source checksum, record/field counts and final dataset paths |
+
+The analysis CSV intentionally uses empty fields for missing values. Original empty strings and missing values can therefore coincide in that portable representation; the canonical source import and typed RDS retain exact original strings. The CSV round-trip test explicitly verifies this missing-value convention.
+
+**Why it matters.** Report 02 reads `data/clean/CRM/restricted/crm_contacts_clean.csv` with explicit column types and simple checks for required fields, parser problems and the expected record count. The RDS remains optional. Contact-level data is not displayed in the rendered reports. Restricted directories and owner-only file modes reduce accidental exposure but do not replace approved organisational access controls.
+
+# Remaining limitations
+
+- This is a snapshot dated 29 July 2026, not a current live CRM assessment.
+- The export's mixed quoting rule is empirically validated for this file. A new export requires a new checksum contract and the same fail-closed validation.
+- The controlled `No` placeholder list is inherited evidence, not independently confirmed semantics for every contact type.
+- All source fields are retained, but many detailed business meanings remain unverified.
+- Phone cleaning does not establish validity; email syntax does not establish delivery; postcode formatting does not establish address accuracy.
+- Organisation/name keys are candidate comparison aids, not verified entity identifiers.
+- Date parsing does not verify factual accuracy or make administrative dates qualifying engagement.
+- No group-members export or dated interaction dataset is introduced here. Later business classifications require separate approved analysis.
+- The rendered report contains aggregate results only. Contact values, notes and review records remain restricted.
+
+# Reproduction
+
+From the CRM project root:
+
+```bash
+Rscript R/CRM/prepare_crm.R
+quarto render reports/01_crm_data_preparation.qmd
+```
+
+The QMD executes the same pipeline itself; rendering does not depend on objects left in an interactive R session. Dependencies: Python 3 and R packages `readr`, `dplyr`, `stringr`, `lubridate`, `janitor`, `purrr`, `tibble`, `jsonlite` and `knitr`; Quarto is required for HTML rendering. Tested versions are recorded in `data/analysis/CRM/01_preparation/validation/runtime_versions.csv`.
