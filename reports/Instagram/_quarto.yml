@@ -1,0 +1,5 @@
+project:
+  type: default
+  output-dir: ../../outputs/build/reports/Instagram
+  render:
+    - instagram_analysis.qmd

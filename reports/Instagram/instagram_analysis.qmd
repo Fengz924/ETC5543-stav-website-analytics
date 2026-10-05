@@ -1,0 +1,143 @@
+---
+title: "STAV Instagram Analytics Report"
+subtitle: "Awareness, interest, engagement and audience growth"
+author: "Feng Zhu"
+date: "2026-10-06"
+format:
+  html:
+    toc: true
+    toc-depth: 2
+    number-sections: true
+    embed-resources: true
+execute:
+  echo: false
+  warning: false
+  message: false
+---
+
+```{r}
+#| label: setup
+#| include: false
+here::i_am("reports/Instagram/instagram_analysis.qmd")
+source(here::here("R/Instagram/instagram_analysis.R"))
+show_table <- function(x,caption=NULL) knitr::kable(x,digits=2,caption=caption)
+f <- function(x) format(x,big.mark=",",trim=TRUE)
+```
+
+# Purpose and Scope
+
+This report assesses STAV's Instagram performance from **1 July 2025 to 30 June 2026**. The unit of observation is a calendar day. It examines awareness, interest, interactions and recorded follows, with weekly and monthly summaries. It is a separate analytical stream alongside CRM and GA4.
+
+# Data Sources and Preparation
+
+Six original Meta exports are read unchanged from `data/raw/Meta/Insta/`. The UTF-16 files have two introductory rows and Date/Primary fields. Dates are validated and joined to the 365-day reporting calendar. Missing source rows remain missing, rather than becoming zeros. Negative, malformed, duplicate or out-of-period observations stop execution. Source checksums are recorded in the output manifest.
+
+```{r}
+show_table(select(manifest,metric,rows,first_date,last_date,missing_days,zero_days),"Source coverage")
+```
+
+Five metrics have complete daily coverage. Follows has **`r manifest$rows[manifest$metric=="follows"]` observed days**; the export does not establish whether absent dates indicate zero follows or missing reporting. Full-period follows totals and growth rates are therefore withheld. All results are recalculated from source files when this report renders. Preparation also reconciles observed daily sums against the source and monthly summaries.
+
+# Metric Framework
+
+| Framework | Exported metrics | Interpretation |
+|---|---|---|
+| Awareness | Views, Reach | Recorded exposure and daily reached audience |
+| Interest | Visits, Link Clicks | Profile interest and reported link activity |
+| Engagement | Interactions | Recorded content interactions |
+| Audience growth | Follows | Recorded follow events on available dates |
+
+Summing daily Reach gives **summed daily reach**, not a deduplicated monthly or annual audience. Views can include repeated exposure. Follows is not follower stock or net growth; unfollows and starting/ending follower counts are absent. Visits and clicks are distinct actions and cannot identify an individual conversion journey. Metric labels follow the exports; detailed platform definitions and paid/organic splits are unavailable.
+
+# Overall Instagram Performance
+
+```{r}
+overview <- tibble(metric=metrics,observed_days=map_int(metrics,~sum(!is.na(daily[[.x]]))),
+ observed_sum=map_dbl(metrics,~sum(daily[[.x]],na.rm=TRUE)),
+ complete_period_total=map_dbl(metrics,~if(anyNA(daily[[.x]])) NA_real_ else sum(daily[[.x]])))
+show_table(overview,"Observed sums and defensible complete-period totals (NA = unavailable)")
+```
+
+Instagram recorded **`r f(sum(daily$views))` views**, **`r f(sum(daily$interactions))` interactions**, **`r f(sum(daily$visits))` profile visits** and **`r f(sum(daily$link_clicks))` link clicks**. Summed daily reach was **`r f(sum(daily$reach))`**. These quantities measure different stages of activity and should be assessed separately.
+
+# Monthly Trends
+
+**Business question:** When was each metric strongest or weakest?
+
+**Method:** Aggregate complete daily metrics by calendar month; withhold totals for any month with missing observations. Use separate vertical scales because the metrics have different magnitudes.
+
+```{r}
+p_month
+show_table(select(monthly,period,ends_with("_total")),"Monthly totals; reach is summed daily reach")
+show_table(peaks,"Peak and lowest months, including ties")
+```
+
+The table identifies the highest and lowest recorded months for each complete metric. Peaks are descriptive evidence of timing, rather than evidence of a particular campaign's effect. Early zero runs should be checked against platform reporting history before interpreting them as a lack of activity.
+
+# Weekly Trends and Unusually Strong/Weak Periods
+
+**Method:** Weeks start on Monday. Boundary weeks contain fewer than seven in-scope days and remain in the saved weekly output, but are excluded from comparisons and unusual-period detection. For each metric, complete-week totals above Q3 + 1.5 × IQR or below Q1 − 1.5 × IQR are flagged. These descriptive flags are not statistical significance tests; a nonnegative lower bound can mean no weak weeks are flagged.
+
+```{r}
+p_week
+show_table(filter(weekly_long,unusually_strong|unusually_weak),"Weeks outside the descriptive IQR fences")
+show_table(weekly_long |> filter(!is.na(total)) |> group_by(metric) |>
+ slice_max(total,n=3,with_ties=FALSE) |> ungroup() |> select(metric,period,total),"Three highest complete weeks per metric")
+show_table(weekly_long |> filter(!is.na(total)) |> group_by(metric) |>
+ slice_min(total,n=3,with_ties=FALSE) |> ungroup() |> select(metric,period,total),"Three lowest complete weeks per metric")
+```
+
+# Indicative Engagement / Efficiency Metrics
+
+Two descriptive ratios are reported: interactions per 100 summed daily reach, and link clicks per 100 profile visits. They are ratios of period sums, not averages of daily ratios. Zero or missing denominators produce NA. These are activity ratios, not unique-person engagement rates or conversion probabilities; numerator and denominator actions need not concern the same users or content. Neither provides cost efficiency without expenditure data.
+
+```{r}
+show_table(select(monthly,period,interactions_per_100_daily_reach,link_clicks_per_100_visits),"Indicative activity ratios")
+```
+
+# Campaign and Event Context
+
+No verified Instagram campaign/post calendar linking these dates to published content is available in the six exports. The strongest weeks provide a shortlist for review against STAV's publishing and event records. Existing GA4 discussion of Science Talent Search, events, membership and resources supplies business context but does not demonstrate that these activities caused Instagram peaks. No campaign labels have been inferred from coincident dates.
+
+# Relationship with GA4 Organic Social Traffic
+
+No validated monthly GA4 derived output was found. This report reuses, in memory, `data/raw/GA4/traffic_channel_monthly_20250701_20260630.csv`, the exact existing export used by `reports/final_report.qmd`. It validates one Organic Social row for each month and derives the year from the fixed July–June reporting period. No GA4 source or dataset is copied or modified.
+
+```{r}
+if(nrow(ga4_comparison)) {
+ show_table(select(ga4_comparison,period,views_total,visits_total,link_clicks_total,organic_social_sessions),"Instagram activity alongside GA4 Organic Social sessions")
+ pairs <- tibble(metric=c("views_total","visits_total","link_clicks_total")) |>
+   mutate(months=nrow(ga4_comparison),pearson_r=map_dbl(metric,function(m) {
+     a <- ga4_comparison[[m]]; b <- ga4_comparison$organic_social_sessions
+     if(sd(a)==0||sd(b)==0) NA_real_ else cor(a,b)
+   }))
+ show_table(pairs,"Exploratory monthly associations (12 observations)")
+} else cat("The monthly GA4 export is unavailable; no comparison is calculated.")
+```
+
+Organic Social includes other social platforms and cannot isolate Instagram referrals. Monthly co-movement, including correlation, cannot establish attribution or causation. Clicks and sessions differ in definition, timezone, consent/tracking coverage and repeat behaviour. With only 12 observations, shared seasonality or an exceptional month can strongly affect correlation; no significance or conversion claim is made.
+
+# Key Findings
+
+```{r}
+for(m in c("views","reach","visits","link_clicks","interactions")) {
+ row <- monthly[which.max(monthly[[paste0(m,"_total")]]),]
+ cat(sprintf("- **%s** peaked in **%s**, with **%s** recorded activity.\n",m,format(row$period,"%B %Y"),f(row[[paste0(m,"_total")]])))
+}
+```
+
+March accounted for **`r f(monthly$link_clicks_total[monthly$period==as.Date("2026-03-01")])` of `r f(sum(daily$link_clicks))` link clicks (`r round(100*monthly$link_clicks_total[monthly$period==as.Date("2026-03-01")]/sum(daily$link_clicks),1)`%)**, making the annual link-click result heavily concentrated in one month. Views and interactions peak in February, whereas summed daily reach and link clicks peak in March; the metrics do not show one uniform peak period.
+
+Follows coverage is insufficient for an annual growth assessment. Reach totals describe repeated daily audience exposure. The strongest weekly periods warrant content review, while the available GA4 comparison supports contextual assessment only.
+
+# Recommendations
+
+- Review the highest weeks against dated posts, format, topic and calls to action to identify approaches worth testing.
+- Investigate zero runs and the sparse Follows export with the data owner; obtain complete daily follower changes and beginning/end follower stocks.
+- Maintain a campaign calendar with publication dates, events, creative formats and paid promotion records.
+- Use consistent UTM tags for Instagram links and export GA4 source/medium monthly data to distinguish Instagram from other social platforms.
+- Monitor complete monthly activity ratios alongside volumes; set targets after validating coverage and metric definitions.
+
+# Limitations
+
+The exports have no post-level content, follower stock, unfollows, spend, demographic breakdown or verified campaign calendar. Sparse Follows dates cannot be interpreted as zero without confirmation. Repeated reach cannot be deduplicated across days. Complete date coverage validates structure, not the accuracy or historical consistency of platform measurement. Export timestamps lack a timezone designation, so day boundaries are retained exactly as exported. The analysis is observational; attribution, revenue impact, paid-versus-organic effectiveness and causal campaign effects are not established.
