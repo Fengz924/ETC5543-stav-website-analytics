@@ -3,4 +3,4 @@ project:
   execute-dir: project
   output-dir: outputs/build
   render:
-    - reports/final_report.qmd
+    - reports/GA4/stav_website_report.qmd
