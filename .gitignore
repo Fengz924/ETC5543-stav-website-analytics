@@ -110,3 +110,7 @@ _freeze/
 
 /.quarto/
 **/*.quarto_ipynb
+
+# CRM preparation metadata only (no contact values)
+!docs/CRM/source_contract.json
+!docs/CRM/crm_field_dictionary.csv
