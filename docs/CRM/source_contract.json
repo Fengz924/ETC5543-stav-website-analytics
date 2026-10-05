@@ -1,0 +1,9 @@
+{
+  "source_filename": "CRM20260729.csv",
+  "reference_source": "data/raw/CRM/CRM20260729.csv",
+  "sha256": "6fd0cad285838da5039fdc4c89c1bfa5329cde1862fac2c965c90b4d314ae569",
+  "expected_fields": 71,
+  "expected_records": 6051,
+  "extract_date": "2026-07-29",
+  "dialect": "comma delimiter; double-quoted fields; doubled CSV quotes; literal backslash-quote inside quoted JSON notes"
+}
