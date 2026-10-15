@@ -1,0 +1,46 @@
+# FICTIONAL DEMO DATA
+# Not an actual GA4 export
+# No STAV operational data
+# Deterministic fixture
+# Generated locally
+# All demonstration rows
+# Monthly aggregates
+# Start date: 20250701
+# End date: 20260630
+"Session primary channel group (Default Channel Group)","Month","Sessions","Engaged sessions"
+"Direct","07",140,42
+"Organic Search","07",163,97
+"Referral","07",186,93
+"Direct","08",157,47
+"Organic Search","08",180,108
+"Referral","08",203,101
+"Direct","09",174,52
+"Organic Search","09",197,118
+"Referral","09",220,110
+"Direct","10",191,57
+"Organic Search","10",214,128
+"Referral","10",237,118
+"Direct","11",208,62
+"Organic Search","11",231,138
+"Referral","11",254,127
+"Direct","12",225,67
+"Organic Search","12",248,148
+"Referral","12",271,135
+"Direct","01",242,72
+"Organic Search","01",265,159
+"Referral","01",288,144
+"Direct","02",259,77
+"Organic Search","02",282,169
+"Referral","02",305,152
+"Direct","03",276,82
+"Organic Search","03",299,179
+"Referral","03",322,161
+"Direct","04",293,87
+"Organic Search","04",316,189
+"Referral","04",339,169
+"Direct","05",310,93
+"Organic Search","05",333,199
+"Referral","05",356,178
+"Direct","06",327,98
+"Organic Search","06",350,210
+"Referral","06",373,186

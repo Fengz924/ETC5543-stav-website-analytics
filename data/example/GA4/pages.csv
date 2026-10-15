@@ -1,0 +1,58 @@
+# FICTIONAL DEMO DATA
+# Not an actual GA4 export
+# No STAV operational data
+# Deterministic fixture
+# Generated locally
+# All demonstration rows
+# Monthly aggregates
+# Start date: 20250701
+# End date: 20260630
+"Page path and screen class","Month","Views"
+"/","07",250
+"/fictional-events/","07",281
+"/fictional-resources/","07",312
+"/fictional-membership/","07",343
+"/","08",269
+"/fictional-events/","08",300
+"/fictional-resources/","08",331
+"/fictional-membership/","08",362
+"/","09",288
+"/fictional-events/","09",319
+"/fictional-resources/","09",350
+"/fictional-membership/","09",381
+"/","10",307
+"/fictional-events/","10",338
+"/fictional-resources/","10",369
+"/fictional-membership/","10",400
+"/","11",326
+"/fictional-events/","11",357
+"/fictional-resources/","11",388
+"/fictional-membership/","11",419
+"/","12",345
+"/fictional-events/","12",376
+"/fictional-resources/","12",407
+"/fictional-membership/","12",438
+"/","01",364
+"/fictional-events/","01",395
+"/fictional-resources/","01",426
+"/fictional-membership/","01",457
+"/","02",383
+"/fictional-events/","02",414
+"/fictional-resources/","02",445
+"/fictional-membership/","02",476
+"/","03",402
+"/fictional-events/","03",433
+"/fictional-resources/","03",464
+"/fictional-membership/","03",495
+"/","04",421
+"/fictional-events/","04",452
+"/fictional-resources/","04",483
+"/fictional-membership/","04",514
+"/","05",440
+"/fictional-events/","05",471
+"/fictional-resources/","05",502
+"/fictional-membership/","05",533
+"/","06",459
+"/fictional-events/","06",490
+"/fictional-resources/","06",521
+"/fictional-membership/","06",552

@@ -114,3 +114,14 @@ _freeze/
 # CRM preparation metadata only (no contact values)
 !docs/CRM/source_contract.json
 !docs/CRM/crm_field_dictionary.csv
+
+# Fully fictional dashboard fixtures only
+!data/example/dashboard/
+!data/example/dashboard/**/
+!data/example/dashboard/**/*.csv
+!data/example/dashboard/*.csv
+
+# Fictional GA4 examples copied from the dashboard fixture
+!data/example/GA4/
+!data/example/GA4/*.csv
+!data/example/README.md

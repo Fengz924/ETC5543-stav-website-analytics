@@ -1,0 +1,7 @@
+"field","records_populated","coverage"
+"email",120,1
+"full_name",120,1
+"organisation",96,0.8
+"phone",80,0.666666666666667
+"status",90,0.75
+"plan",96,0.8
