@@ -764,15 +764,9 @@ These results provide a practical review list for improving school-contact relat
 
 # 5 Membership Analysis
 
-## 5.1 What membership information is recorded?
+## 5.1 What membership statuses are recorded?
 
-**Business question**
-
-What membership status and membership plan information is recorded in the CRM?
-
-**Method**
-
-Recorded statuses and plans were counted after combining obvious case and spacing variations in status, and dash and spacing variations in plans.
+**1,041 CRM records have a recorded membership status**. The figure shows the distribution of these recorded statuses.
 
 ```{r}
 #| label: membership-summary
@@ -812,10 +806,6 @@ write_csv(status_chart_data, "data/analysis/CRM/02_analysis/crm_membership_statu
 write_csv(plan_counts, "data/analysis/CRM/02_analysis/crm_membership_plan_counts.csv")
 ```
 
-**Result**
-
-Membership status is recorded for **1,041 CRM records**, and membership plan for **1,199 records**. These are record counts, not verified membership counts.
-
 ```{r}
 #| label: membership-status-figure
 #| fig-width: 8
@@ -839,7 +829,13 @@ ggsave("reports/figures/CRM/crm_membership_status.png",
          width = 85)), width = 8, height = 4.8, dpi = 300)
 ```
 
-Other statuses comprise Cancelled (26), Pending-cancel (3), Paused (2) and Pending (1).
+**Interpretation**
+
+Active is the most common recorded status. However, membership status describes what is recorded in the CRM and should not by itself be interpreted as verified current membership or engagement.
+
+**Note:** Other statuses comprise Cancelled (26), Pending-cancel (3), Paused (2) and Pending (1).
+
+## 5.2 What membership plans are recorded?
 
 ```{r}
 #| label: membership-plan-table
@@ -849,9 +845,9 @@ knitr::kable(plan_counts |> transmute(`Membership plan` = plan, Records = record
 
 **Interpretation**
 
-Active is the most commonly recorded status. School group memberships form an important part of the recorded plans, alongside individual teacher, professional and organisation membership types. Plan labels alone do not establish current entitlement.
+Membership plans describe the type of membership recorded for a contact, while membership status describes its recorded state. The two fields are not always populated together, so their totals differ. These counts represent CRM contact records, not verified people, schools or current memberships.
 
-## 5.2 Are the membership records consistent?
+## 5.3 Membership review priorities and current-membership limits
 
 ```{r}
 #| label: membership-review-table
@@ -871,48 +867,27 @@ write_csv(membership_review, "data/analysis/CRM/02_analysis/crm_membership_revie
 knitr::kable(membership_review, align = c("l", "r"))
 ```
 
-These are review candidates, not confirmed errors. Missing membership information may be legitimate for some CRM contacts. The 49 Active-status records with an earlier end date are particularly useful to review because the recorded status and subscription date do not clearly align. These indicators may overlap and should not be added together.
+**Interpretation**
 
-Possible explanations include fields being updated at different times or through different processes, or historical values remaining after a membership change or renewal. An Active status with an earlier end date may indicate that status and subscription dates have not been updated together. The export cannot establish the workflow behind these differences.
+The review identifies differences between recorded membership fields that warrant checking. In particular, **49 records are marked Active despite a recorded subscription end date before 29 July 2026**. These are priority review candidates: the export alone cannot establish whether the status, date or membership entitlement needs updating.
 
-## 5.3 Can current membership be reliably identified?
+The three review indicators may overlap and should not be added together. They are review indicators, not confirmed CRM errors.
 
-The current CRM export does not fully establish a verified current-member population. Recorded Active status is useful, but some Active records have subscription end dates before the snapshot, some membership records lack status, plan or dates, and the authoritative source and business rules for entitlement have not been confirmed.
+**What does this mean for STAV?**
 
-**Recorded Active membership status should not be interpreted as evidence that a contact is actively engaged with STAV.**
+The current export cannot establish a verified current-member population from membership status, plan and subscription dates alone. STAV would need an agreed definition of current membership, clear entitlement rules and an authoritative source or workflow for maintaining these fields consistently.
 
-STAV would need an agreed authoritative membership source, clear rules for status and subscription dates, and consistent updating of membership information to report current membership more reliably.
-
-**Why it matters to STAV**
-
-Clearer membership information would support renewal administration, membership communication and reliable current-member reporting.
-
-**Limitation**
-
-This analysis uses the 29 July 2026 CRM snapshot. Counts represent CRM records, not verified people or membership entitlements. Missing or conflicting fields do not automatically mean a record is incorrect.
+A recorded Active status should also not be interpreted as evidence that a contact is actively engaging with STAV.
 
 # 6 Contact Activity and Dormancy
 
-## 6.1 Can a Last Contact Date be identified?
+The current CRM export does **not provide enough dated interaction history to reliably identify engaged or dormant contacts**. A recorded Active membership status describes membership information in the CRM; it does not show whether a contact is actively engaging with STAV.
 
-The current CRM export does not contain a reliable field that can be interpreted as a contact’s Last Contact Date. Record creation, administrative updates, membership status changes and subscription dates are not substitutes for actual contact or interaction history.
+To measure engagement or dormancy reliably, STAV would need consistent dated interaction data—such as communications, event participation or other agreed activity measures—and a clear definition of what counts as active or dormant.
 
-A reliable measure would need dated evidence such as email or communication history, event interactions, CRM notes documenting contact, or other meaningful engagement records linked to the contact.
+Therefore, no engaged- or dormant-contact population is reported from this export.
 
-The available export mainly describes contact and membership information and does not provide a complete dated interaction history. A lack of recorded recent activity therefore cannot be interpreted as evidence that a contact is dormant.
-
-## 6.2 How many contacts are genuinely active?
-
-**Not currently measurable from the available CRM export.**
-
-STAV would need to agree on what counts as meaningful engagement and over what period. This might include event participation, email interaction, membership activity or direct contact, supported by dated evidence. Recorded Active membership status does not establish active engagement.
-
-## 6.3 How many contacts are dormant?
-
-**Not currently measurable from the available CRM export.**
-
-STAV would first need a reliable interaction history, an agreed definition of meaningful activity and an agreed inactivity period. No dormancy threshold or contact classification has been assigned in this report.
-
+<!--
 # 7 Key Business Findings
 
 1. **CRM scale:** The CRM contains 6,051 records. This is not a verified count of different people.
@@ -922,16 +897,17 @@ STAV would first need a reliable interaction history, an agreed definition of me
 5. **Membership information:** Recorded membership fields are useful but do not fully establish a verified current-member population. The 49 Active-status records with subscription end dates before the snapshot provide a practical review population.
 6. **Engagement:** Genuine active and dormant contact populations cannot currently be measured because reliable interaction history and agreed definitions are unavailable.
 
-# 8 Recommendations
+-->
 
-1. **Review potential duplicate people.** Prioritise same-name candidates with supporting organisation or phone evidence. Confirm identity before merging records; do not merge automatically.
-2. **Improve organisation and school-contact links.** Prioritise school-plan records missing organisation information and confirm Group Admin and Group Member roles where needed. Maintain the reviewed school-name master mapping to standardise names before school-level analysis of contacts, group roles and membership information. Do not automatically link the nine ambiguous CRM names until they are resolved, and validate campus information.
-3. **Review membership inconsistencies.** Start with Active-status records whose subscription end dates precede the snapshot, then clarify records with plan or status gaps.
-4. **Establish clearer membership data rules.** Agree on the authoritative source for entitlement and how membership status, plan and subscription dates should be maintained.
-5. **Improve engagement tracking.** Establish a reliable Last Contact or Last Interaction measure and agree on meaningful engagement before defining active and dormant contacts.
+# 7 Recommendations
 
-# 9 Conclusion
+1. **Review potential duplicate contacts.** Start with same-name candidates that also share organisation and/or usable phone information. Confirm identity before merging or deleting any CRM records.
+2. **Improve key contact information where relevant.** Prioritise missing organisation, phone and location information where these fields are needed for school-contact management, segmentation and communication.
+3. **Standardise school names and strengthen school-contact links.** Use the reviewed school mapping as a basis for future standardisation after ambiguous names and campus information have been checked. Also review school-plan contacts without an organisation and organisation groups where recorded Admin and Member roles are unclear.
+4. **Review membership-field differences.** Prioritise the 49 records marked Active with a subscription end date before 29 July 2026, while also reviewing records where membership plan and status information do not align. Treat these as review indicators rather than confirmed errors.
+5. **Establish authoritative current-membership rules.** Define how membership status, plan and subscription dates determine current entitlement, and maintain these fields through a consistent source or workflow.
+6. **Establish engagement tracking and definitions.** Capture consistent dated interaction information and agree what counts as engaged or dormant before reporting active or dormant contact populations.
 
-STAV’s CRM contains useful information for communication, membership administration and school relationships. The main opportunity is to improve consistency, organisation-contact links and clarity around membership information, alongside filling relevant information gaps.
+# 8 Conclusion
 
-Contact engagement and dormancy cannot yet be measured reliably. Better interaction tracking and agreed membership and engagement definitions would make future CRM reporting and decision-making more dependable.
+The CRM provides a useful foundation for contact, school and membership analysis, but several areas require clearer data standards and review before they can support reliable person-, school- or membership-level reporting. The priorities identified in this report are to strengthen contact and school information, review potential duplicate and membership records, establish authoritative membership rules, and improve engagement tracking.
