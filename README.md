@@ -1,55 +1,22 @@
-# STAV Data Analytics Project
+# STAV CRM and Website Analytics
 
-A data analytics project exploring STAV's digital, CRM and event data to assess data quality, understand engagement patterns and generate evidence-based marketing and member insights.
+This project analyses the Science Teachers’ Association of Victoria (STAV)'s CRM records and Google Analytics 4 (GA4) website data. It assesses data quality, school-contact relationships, membership information, website use and measurement limitations to support STAV's decisions.
 
-## Project Overview
+## Project Scope
 
-The overall goal of this project is to develop a clearer understanding of STAV's data landscape and establish a foundation for evidence-based marketing and member engagement decisions.
+The project covers two data sources:
 
+- **CRM:** contact-record quality and completeness, potential duplicate records, school-name standardisation, school-contact relationships and recorded membership information.
+- **Google Analytics 4 (GA4):** website traffic acquisition, content use, audience and device patterns, recorded interactions and tracking limitations.
 
-### Phase 1 — Understand the Data
+The Shiny dashboard and presentation communicate findings from these two workstreams.
 
-Identify what data exists, where it is stored, how it is structured, and how reliable and usable it is.
+## Analysis Periods
 
-Key activities include:
+- **GA4:** 1 July 2025–30 June 2026. Supplementary path exploration covers 1 August–30 September 2026 and is identified separately in the report.
+- **CRM:** export snapshot dated 29 July 2026.
 
-* identifying and documenting available data sources
-* understanding key variables, metrics and data structures
-* assessing data completeness, consistency and quality
-* identifying tracking and measurement limitations
-* evaluating the usability of each data source for future analysis
-
-### Phase 2 — Use the Data
-
-Use reliable and relevant data sources to generate meaningful insights that can support STAV's marketing and member engagement decisions.
-
-Potential areas of analysis include:
-
-* website traffic and user engagement
-* traffic acquisition and channel performance
-* website content performance
-* social media performance
-* event engagement
-* member and CRM engagement
-* cross-platform marketing performance
-
-## Data Sources
-
-The project currently considers data from:
-
-* Google Analytics 4 (GA4)
-* Meta
-* LinkedIn
-* CRM
-* Events
-
-## Analysis Period
-
-Where possible, analysis will use a consistent 12-month period:
-
-**1 July 2025 – 30 June 2026**
-
-This provides a consistent basis for comparing performance across different data sources.
+The CRM snapshot and GA4 reporting period describe different units and timeframes. CRM records are not a verified count of unique people, and recorded membership status does not establish engagement. Website interactions do not by themselves establish registrations, memberships or other organisational outcomes.
 
 ## Data Privacy
 
