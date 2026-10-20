@@ -1,47 +1,57 @@
-# STAV Quarto presentation
+# STAV presentation
 
-## Preview and edit
+This folder is an independent Quarto Reveal.js project, alongside `reports/`.
+The latest slides and English speaker notes are in `stav_presentation.qmd`.
+Keep this file together with `theme.css`, `_quarto.yml` and `figures/`.
 
-From this directory:
+## Preview and build on another computer
+
+Install Quarto CLI (https://quarto.org/docs/get-started/). Then, from the repository root:
 
 ```sh
+cd presentation
 quarto preview stav_presentation.qmd
 ```
 
-If Quarto is not on PATH on this Mac:
+To build an HTML presentation:
 
 ```sh
-/Applications/RStudio.app/Contents/Resources/app/quarto/bin/quarto preview stav_presentation.qmd
-```
-
-Edit `stav_presentation.qmd`. Each `##` starts a slide. Speaker notes are inside `.notes` blocks. Press S in the HTML presentation for speaker view. Use arrow keys to navigate and Esc for the overview.
-
-## Build
-
-```sh
+cd presentation
 quarto render stav_presentation.qmd
 ```
 
-The output is `build/stav_presentation.html`. It embeds resources for offline use. Open it in a browser to present. This is a Quarto HTML slide deck, not a PowerPoint `.pptx` file. Confirm the Moodle upload format before submission.
+Run either command from the repository root in a fresh terminal; if already in
+`presentation/`, omit `cd presentation`. Output: `build/stav_presentation.html`.
+The nested project configuration keeps this build separate from the GA4 report.
+The slides disable code execution, so rendering needs no R installation, private
+CRM data, GA4 exports or machine-specific paths. All referenced charts are included.
+Resources are embedded in the generated HTML for offline presentation. Press S
+for speaker view. Browser font availability can cause small layout differences.
 
-## Rehearsal
+## Optional chart regeneration
 
-Read `speaker_script.md`, then practise in your own words. There are 12 main slides and 4 appendix slides. End the talk on Conclusions and open the appendix only for questions. Aim for 9–10 minutes, leaving 5 minutes for questions.
+The included PNGs are sufficient for rendering. To edit and regenerate charts,
+install R and the `ggplot2` package, then run from this directory:
 
-Before delivery, confirm your name, talk date, individual/group timing and exact contribution to candidate generation. Verify the fuzzy matching algorithm from its original code before naming a metric or threshold. GA4 inspection findings describe the report's inspection, not a fresh live audit.
+```r
+install.packages("ggplot2")
+```
 
-The existing analytical reports and project-wide configuration are unchanged. Figures and numbers are based on those reports. The deck does not execute the restricted raw-data workflows.
+```sh
+Rscript make_figures.R
+quarto render stav_presentation.qmd
+```
 
-## Figures
+`make_figures.R` uses report aggregates and the included
+`figures/school_name_distribution.csv`, not confidential source data. Update these
+aggregates if the analytical reports change. R package versions are not locked.
 
-Five result charts replace text-heavy result slides. Aggregate values come from the approved analytical reports. Rebuild with `Rscript make_figures.R` from this directory, then render the Quarto file. The R source preserves editable chart definitions. Charts use manually transcribed report aggregates, so update the values if the analytical reports change.
+## Live dashboard demonstration
 
-## Visual structure
+Rendering the slides does not run the Shiny app. A live demonstration separately
+requires R, the dashboard packages, and configured data. For a portable fictional
+demo, follow `../apps/stav-dashboard/README.md`. Installing Quarto alone does not
+make the live dashboard runnable.
 
-Slides 1, 2, 8 and 9 use editable HTML/CSS diagrams. Edit the labels in the QMD and layout in theme.css. CRM results use blue section labels and GA4 results use teal. Workflow lanes remain separate and jointly inform recommendations. The independent speaking script matches the revised workflow.
-
-The repeated title slide has been removed. Four result slides now include explicit report-based counts, denominators and comparisons. The school-name chart uses the copied report aggregate in figures/school_name_distribution.csv. The 22.8% and 7.8% CRM shares are derived from 1,379/6,051 and 49/632 respectively.
-
-## Current talk structure
-
-The opening is the original Business questions and data slide, with no separate title slide. CRM examples are explicitly illustrative and contain no contact-level data. The school example comes from the reviewed mapping in the CRM report. GA4 terminology has a dedicated slide. The Shiny feature map and 60-second demo run sheet reflect the current app source. The script includes the lecturer’s four Q&A tips and sample discussion phrases. Target timing: 9 minutes 50 seconds including the demo.
+`build/`, `.quarto/` and `Rplots.pdf` are local generated files and are ignored.
+The separate Markdown speaker script has been removed; use the QMD speaker notes.
