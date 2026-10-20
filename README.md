@@ -18,14 +18,6 @@ The Shiny dashboard and presentation communicate findings from these two workstr
 
 The CRM snapshot and GA4 reporting period describe different units and timeframes. CRM records are not a verified count of unique people, and recorded membership status does not establish engagement. Website interactions do not by themselves establish registrations, memberships or other organisational outcomes.
 
-## Data Privacy
-
-STAV operational data may contain confidential or sensitive information.
-
-Raw datasets and platform exports are excluded from this repository using `.gitignore`.
-
-Only sanitised documentation, reproducible analysis code, and approved non-sensitive outputs will be committed.
-
 ## Main Deliverables
 
 - [CRM data preparation and validation](reports/CRM/01_crm_data_preparation.qmd)
@@ -58,56 +50,58 @@ Only sanitised documentation, reproducible analysis code, and approved non-sensi
     └── example/                   # Fictional example data
 ```
 
-## Software and Execution
+## Reports and Execution
 
-Use R and Quarto. RStudio is optional. Existing code uses `tidyverse`, `janitor`,
-`lubridate`, `here`, `readxl`, `knitr`, `scales`, and `forcats` across the project.
-No dependency lockfile is provided. The tested environment and render warnings
-are recorded in `docs/reproducibility.md`.
+Use R and Quarto; RStudio is optional. Install the R packages required by each workflow. There is no dependency lockfile, so package versions are not automatically reproduced on another computer.
 
-Run commands from the repository root, with authorised input data present:
+Run report commands from the repository root with authorised input data present.
 
-```bash
+### CRM
+
+Prepare and validate the data before running the analysis report:
+
+```sh
+quarto render reports/CRM/01_crm_data_preparation.qmd --to html
+quarto render reports/CRM/02_crm_analysis_report.qmd --to html
+```
+
+See [CRM documentation](docs/CRM/README.md) for the source contract, required inputs and validation rules. A new CRM export may require changes to the source contract and snapshot-specific checks before analysis.
+
+### GA4
+
+```sh
+quarto render reports/GA4/stav_website_report.qmd
+```
+
+The root `_quarto.yml` renders only this GA4 report by default, uses the repository root for execution and writes output under `outputs/build/`.
+
+The separate script can also be run:
+
+```sh
 Rscript R/ga4/GA4_Web_Analytics.R
-quarto render reports/final_report.qmd
 ```
 
-The script displays analytical summaries and plots; it does not supply an input
-object to the report. The report independently reads the same GA4 exports.
-`_quarto.yml` sets project-root execution and sends rendered output to
-`outputs/build/`. The report's existing format is HTML; PDF rendering is not
-configured. Build outputs are private review artifacts, not approved publications.
+The script and report retain separate analytical implementations; the report reads its own inputs rather than consuming an object produced by the script.
 
-The supporting Event audit can be rendered separately:
+### Dashboard
 
-```bash
-quarto render reports/supporting/event_analysis.qmd
+For setup, required packages, input checks and the fictional demonstration mode, see the [dashboard README](apps/stav-dashboard/README.md). Real-data mode requires prepared CRM summaries and GA4 exports. Replacing raw CRM data alone does not refresh the dashboard.
+
+### Presentation
+
+From the repository root:
+
+```sh
+cd presentation
+quarto render stav_presentation.qmd
 ```
 
-It requires the private participant workbook and writes cleaned CSVs under
-`data/clean/Events/`. Review its rendered participant-level information before
-sharing. The default project render list includes only the final GA4 report.
-Presentation rendering instructions await an authoritative source.
+The presentation is an independent Quarto project. It uses bundled charts and disables code execution, so rendering requires Quarto but does not require R or private datasets. The generated `build/stav_presentation.html` embeds resources for offline use. Running the live Shiny demonstration requires its own R environment and data setup.
 
-## Confidential Data and Reproducibility
+## Data Privacy and Reproducibility
 
-The original STAV datasets are not included because they may contain
-confidential, identifying or commercially sensitive information. Keep raw,
-cleaned, and analysis datasets local and ignored. Their existing component
-folder names (`GA4`, `CRM`, `Events`) are preserved.
+Operational CRM records and GA4 exports are excluded from Git using `.gitignore`. Keep private raw, cleaned and derived datasets local. Only approved non-sensitive outputs, sanitised documentation, analysis code and explicitly fictional examples should be shared.
 
-See [data sources](docs/data_sources.md) for required inputs and
-[reproducibility instructions](docs/reproducibility.md) for workflow details.
-Authorised users must obtain private inputs separately; a public clone alone
-cannot reproduce real-data results.
+A public clone cannot reproduce real-data findings without authorised inputs. Fictional dashboard fixtures support a separate demonstration; they do not validate the production CRM preparation workflow or reproduce STAV's actual findings.
 
-Analysis code retains relevant variable names to document methodology. The
-allowlisted CRM example contains fictional values and illustrates structure;
-it is not a complete runnable replacement for the private CRM export. No
-synthetic GA4 workflow is introduced in this migration.
-
-Existing legacy HTML and historical versions remain in Git. Ignore rules do
-not remove already tracked files or history. Their presence does not establish
-publication clearance. Screenshots and rendered findings also require review
-before sharing. The inventory workbook is retained unchanged and may describe
-an earlier project stage.
+See [data sources](docs/data_sources.md), [CRM documentation](docs/CRM/README.md) and [reproducibility notes](docs/reproducibility.md) for additional context. Some historical documentation and files may describe an earlier, broader project scope; the scope stated in this README is the current scope.
