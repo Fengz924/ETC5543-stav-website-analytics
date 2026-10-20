@@ -13,27 +13,29 @@ execute:
 
 # Executive Summary
 
-STAV’s CRM contains 6,051 records, but this is not a verified count of unique people. No exact duplicate source records, repeated CRM IDs or repeated normalised emails were detected. However, 1,379 records across 566 same-name groups are potential matches requiring review, rather than confirmed duplicates.
+STAV’s CRM contains **6,051 records**, but this should not be interpreted as 6,051 verified unique people. No exact duplicate source records, repeated CRM IDs or repeated normalised emails were detected; however, name-based review identified **1,379 records across 566 same-name groups** that may warrant review. These are potential matches rather than confirmed duplicates.
 
-Email, names and tags are well recorded, while organisation, phone and location information is less consistently recorded. Of the 630 records identified through school group membership plans, 189 (30.0%) have no organisation information recorded, making school-contact links a useful priority for review. The reviewed school-name mapping consolidated 544 CRM school-name variations into 250 approved schools; 160 (64.0%) have multiple CRM names. These figures describe the reviewed population rather than all schools in the CRM.
+Basic identification information is generally well recorded, while organisation, phone and location information is less complete. School naming is also inconsistent within the reviewed mapping: **160 of 250 approved schools (64.0%) have more than one CRM name variation**. The reviewed mapping provides a basis for future standardisation but has not yet been applied to clean or consolidate the underlying CRM.
 
-Membership information is useful but does not fully establish a verified current-member population. In particular, 49 Active-status records have subscription end dates before the 29 July 2026 snapshot. Genuine active and dormant contacts cannot currently be measured because reliable interaction history and agreed engagement definitions are unavailable.
+School-contact relationships also require review. **189 of 630 school-plan records (30.0%) have no organisation recorded**, and some organisation groups have unclear recorded Group Admin and Group Member roles. These findings are review indicators rather than confirmed relationship errors.
 
-STAV should prioritise reviewing potential duplicates, improving school and organisation contact links, clarifying membership information and establishing better engagement tracking.
+Membership information supports useful record-level analysis but does not currently establish a verified current-member population. In particular, **49 records are marked Active despite a recorded subscription end date before 29 July 2026** and should be prioritised for review. A clear definition of current membership and an authoritative process for maintaining membership status, plan and subscription dates are needed.
+
+The current export also does not contain enough dated interaction history to reliably identify engaged or dormant contacts. The report therefore recommends prioritising data review and standardisation, clearer membership rules and improved engagement tracking before using the CRM for more authoritative person-, school-, membership- or engagement-level reporting.
 
 # 1 Purpose and Scope
 
 This report assesses how STAV can use its CRM for contact management, membership administration, school relationships and future engagement. It covers record counts, potential duplicates, information coverage, school-contact structure, membership information and the limits of engagement measurement.
 
-The report covers all records retained by Report 01 from the **29 July 2026 CRM export**. Report 01 handles import alignment, cleaning, missing values, parsed dates and technical preparation flags. Report 02 reads its clean CSV and presents the business analyses and interpretations.
+The report covers all records retained from the **29 July 2026 CRM export** after data preparation and validation. The analysis uses the prepared CRM data to examine data quality, potential duplicate records, school and contact structures, membership information, and other business-relevant CRM patterns.
 
 The main unit of analysis is a **CRM record**. A record, a unique identifier, a verified person, an organisation and a membership are different units. In particular, **CRM records are not a verified count of unique people**, and a recorded Active membership status does not establish an engaged relationship.
 
-All results below are calculated from the validated clean CSV. Historical report numbers are not used as analytical inputs. Contact-level details are not displayed in this report. The snapshot cannot establish today's live CRM position.
+The analyses use the validated clean CRM CSV, the source-import file for exact-duplicate checks, and the reviewed school-name mapping. Historical report numbers are not used as analytical inputs. Contact-level details are not displayed in this report. The snapshot cannot establish today's live CRM position.
 
 **Analytical input and checks**
 
-The report uses `data/clean/CRM/restricted/crm_contacts_clean.csv`, prepared and validated by Report 01 from the 29 July 2026 export. The input checks below confirm that the expected records and fields were read successfully.
+The analysis uses the validated CRM dataset prepared from the **29 July 2026 export**. The input checks below confirm that the expected records and fields were read successfully.
 
 ```{r}
 #| label: read-validated-clean-csv
@@ -128,76 +130,21 @@ if (nrow(crm) != expected_record_count) {
 
 **Business question**
 
-How many contact records are available in STAV's CRM, and how many contain organisation or membership information?
-
-**Why analyse it?**
-
-Before assessing data quality, membership or school relationships, STAV needs a clear picture of the size of its CRM and the information recorded within it.
+How many records are available in STAV’s CRM?
 
 **Method**
 
-The analysis counted all records in the cleaned CRM dataset and checked how many had a CRM ID, email address, organisation, membership status or membership plan recorded.
-
-```{r}
-#| label: record-overview
-crm_record_overview <- tibble(
-  metric = c(
-    "Total CRM records",
-    "Distinct CRM IDs",
-    "Distinct normalised emails",
-    "Records with company/organisation",
-    "Records with membership status",
-    "Records with membership plan"
-  ),
-  records = c(
-    nrow(crm),
-    n_distinct(crm$id, na.rm = TRUE),
-    n_distinct(crm$email_key, na.rm = TRUE),
-    sum(!is.na(crm$company_name)),
-    sum(!is.na(crm$membership_status)),
-    sum(!is.na(crm$membership_plan))
-  ),
-  percentage_of_records = c(
-    1, NA_real_, NA_real_,
-    sum(!is.na(crm$company_name)) / nrow(crm),
-    sum(!is.na(crm$membership_status)) / nrow(crm),
-    sum(!is.na(crm$membership_plan)) / nrow(crm)
-  )
-)
-
-overview_output <- file.path("data", "analysis", "CRM", "02_analysis", "crm_record_overview.csv")
-dir.create(dirname(overview_output), recursive = TRUE, showWarnings = FALSE)
-write_csv(crm_record_overview, overview_output, na = "")
-```
+The analysis counted all records in the validated clean CRM dataset from the 29 July 2026 export.
 
 **Result**
 
-```{r}
-crm_record_overview |>
-  mutate(
-    records = format(records, big.mark = ",", scientific = FALSE, trim = TRUE),
-    percentage_of_records = if_else(
-      is.na(percentage_of_records), "—",
-      sprintf("%.1f%%", 100 * percentage_of_records)
-    )
-  ) |>
-  knitr::kable(
-    col.names = c("Measure", "Count", "Share of all CRM records"),
-    align = c("l", "r", "r")
-  )
-```
+The validated CRM dataset contains **6,051 records** from the 29 July 2026 export. This is **not a verified count of 6,051 unique people**. Although each record has a distinct CRM ID and normalised email address, one person could have multiple records using different contact details. Section 2.2 examines potential duplicates.
 
 ```{r}
-#| label: fig-crm-information-coverage
-#| fig-width: 8
-#| fig-height: 3.8
-#| fig-dpi: 180
-#| fig-align: center
-#| fig-cap: "Percentages show the share of all 6,051 CRM records with each field populated. Categories overlap and are not mutually exclusive; the percentages should not be added together."
-#| fig-alt: "Horizontal bars show company or organisation information on 65.1% of CRM records, membership plan on 19.8%, and membership status on 17.2%. Categories overlap."
+#| label: crm-plotting-setup
+#| include: false
 library(ggplot2)
 
-# Reuse this colour and theme for later CRM charts.
 crm_chart_colour <- "#287D8E"
 crm_chart_theme <- function() {
   theme_minimal(base_size = 12, base_family = "sans") +
@@ -215,82 +162,19 @@ crm_chart_theme <- function() {
     )
 }
 
-coverage_data <- crm_record_overview |>
-  filter(metric %in% c(
-    "Records with company/organisation",
-    "Records with membership plan",
-    "Records with membership status"
-  )) |>
-  mutate(
-    field = recode(metric,
-      "Records with company/organisation" = "Company / organisation",
-      "Records with membership plan" = "Membership plan",
-      "Records with membership status" = "Membership status"
-    ),
-    field = factor(field, levels = c(
-      "Membership status", "Membership plan", "Company / organisation"
-    )),
-    percentage_label = sprintf("%.1f%%", 100 * percentage_of_records)
-  )
-
-coverage_plot <- ggplot(
-  coverage_data, aes(x = percentage_of_records, y = field)
-) +
-  geom_col(fill = crm_chart_colour, width = 0.55) +
-  geom_text(aes(label = percentage_label), hjust = -0.15,
-            size = 4, colour = "#374151") +
-  scale_x_continuous(
-    limits = c(0, 1), breaks = seq(0, 1, 0.2),
-    labels = function(x) sprintf("%.0f%%", 100 * x),
-    expand = expansion(mult = c(0, 0.02))
-  ) +
-  labs(
-    title = "CRM information coverage",
-    subtitle = "Share of all 6,051 CRM records with each field populated",
-    x = NULL, y = NULL
-  ) +
-  crm_chart_theme()
-
 figure_dir <- file.path("reports", "figures", "CRM")
 dir.create(figure_dir, recursive = TRUE, showWarnings = FALSE)
-ggsave(
-  file.path(figure_dir, "crm_information_coverage.png"),
-  plot = coverage_plot + labs(caption = paste(
-    "Categories overlap and are not mutually exclusive;",
-    "the percentages should not be added together."
-  )),
-  width = 8, height = 3.8, dpi = 300, bg = "white"
-)
-coverage_plot
 ```
-
-**Interpretation**
-
-The CRM contains 6,051 records, but this does not necessarily mean STAV has 6,051 different people. Every record has a distinct CRM ID and normalised email address, yet one person could appear in multiple records using different contact details. Potential duplicates are examined in the next section.
-
-Organisation information is recorded for 3,937 records (65.1%). Membership information is recorded for a much smaller part of the CRM: 1,041 records (17.2%) contain a membership status and 1,199 (19.8%) contain a membership plan. These are counts of contact records with information recorded, not counts of organisations, current members or memberships.
-
-**Why it matters to STAV**
-
-The CRM is broader than a membership database. It contains a mix of contacts, and only some records contain membership information. This distinction matters when STAV uses the CRM for membership reporting, school communication or audience segmentation.
-
-**Limitation**
-
-These results describe what was recorded in the July 2026 export, not whether it is correct or current. They do not establish how many unique organisations or current members are represented. Organisation and membership questions are addressed in later sections.
 
 ## 2.2 How many are duplicates or potential duplicates?
 
 **Business question**
 
-Could STAV have multiple CRM records representing the same person?
-
-**Why analyse it?**
-
-Identifying possible repeated contacts helps STAV manage communication, membership information and contact history more reliably.
+How many CRM records could potentially refer to the same person?
 
 **Method**
 
-The analysis first checked for identical source records, repeated CRM IDs and repeated normalised email addresses. It then compared first and last names to identify possible matches. Organisation and phone information were used only as supporting evidence.
+The analysis first checked for exact duplicate source records, repeated CRM IDs and repeated normalised email addresses. It then identified records sharing the same normalised first-and-last-name combination and used matching organisation and usable phone information as additional supporting evidence for review.
 
 ```{r}
 #| label: duplicate-candidate-analysis
@@ -413,9 +297,9 @@ duplicate_results |>
   )
 ```
 
-Affected records are records participating in matching groups, not records that should be removed.
+The name-based review identified **1,379 records across 566 same-name groups**. These are participating CRM records and matching-name groups, not 1,379 confirmed duplicates or 566 duplicate people.
 
-The four categories are mutually exclusive: each candidate record appears once, using its strongest observed organisation and phone support. They help prioritise manual review; they are not confirmed duplicate confidence scores. “Same name only” means no shared organisation or usable phone was found.
+Each candidate record was assigned to one mutually exclusive category based on its strongest observed supporting evidence. Organisation and phone agreement help prioritise review but do not prove that two records belong to the same person.
 
 ```{r}
 #| label: fig-duplicate-support
@@ -455,33 +339,27 @@ duplicate_plot
 
 **Interpretation**
 
-No exact duplicate source records, repeated CRM IDs or repeated normalised emails were detected. However, this does not prove that all 6,051 CRM records represent different people: one person may have separate records using different contact details.
+No exact duplicate source records, repeated CRM IDs or repeated normalised emails were detected by these checks. However, this does not prove that every CRM record represents a unique person, because one person could appear under different contact details.
 
-There are 1,379 same-name candidate records across 566 groups that may require review. Most have name agreement only (997 records). A smaller number of candidate records also share organisation information (290), phone information (61), or both (31), making them useful priorities for manual review. Even the category with both phone and organisation support is not a confirmed duplicate.
+Most name-based candidates have name agreement only, while a smaller number also share organisation and/or usable phone information. Candidates with stronger supporting evidence are more useful to review first, but all remain potential matches rather than confirmed duplicates.
 
-**Why it matters to STAV**
+**What does this mean for STAV?**
 
-Unresolved duplicate people could lead to repeated communications, fragmented contact history, inconsistent membership administration, overstated audience or contact counts, and an incomplete understanding of school-contact relationships. Incorrectly merging different people could create its own data-quality problems. STAV should review candidate records and confirm identity before making changes, rather than automatically deleting or merging records.
+STAV can use these results as a prioritised review list to identify records that may belong to the same person. Confirming genuine duplicates can help reduce fragmented contact histories and improve communication and reporting.
 
-**Limitation**
+**Note:** Matching names do not establish identity, and organisation or phone information can be shared, outdated or incomplete. Records should **not be automatically merged or deleted** from these results; identity should be confirmed through manual review first.
 
-Identical names can belong to different people; some large same-name groups demonstrate why name-only matching needs caution. Organisation and phone information may be shared, outdated or incomplete, and missing information limits confirmation. This analysis does not establish the true number of unique people, and no records should be automatically removed based on these findings.
-
-# 3 Data Quality
+# 3 CRM Data Completeness
 
 ## 3.1 How complete is the CRM data?
 
 **Business question**
 
-How consistently is useful contact information recorded in STAV's CRM?
-
-**Why analyse it?**
-
-More complete contact information helps STAV understand its audience, communicate with contacts and segment the CRM.
+How complete is the key contact information in STAV's CRM?
 
 **Method**
 
-The analysis measured the percentage of all 6,051 CRM records with information recorded in ten selected important fields.
+Completeness was measured as the percentage of CRM records with a recorded value for ten key contact, organisation and membership fields.
 
 ```{r}
 #| label: key-field-coverage
@@ -504,18 +382,6 @@ stopifnot(identical(unname(key_coverage$records_populated),
                    c(6051L, 5831L, 5697L, 3937L, 2068L,
                      2047L, 1936L, 1534L, 1199L, 1041L)))
 write_csv(key_coverage, "data/analysis/CRM/02_analysis/crm_key_field_coverage.csv", na = "")
-```
-
-**Result**
-
-```{r}
-key_coverage |>
-  transmute(
-    Field = field,
-    `Records populated` = format(records_populated, big.mark = ",", trim = TRUE),
-    Coverage = sprintf("%.1f%%", 100 * coverage)
-  ) |>
-  knitr::kable(align = c("l", "r", "r"))
 ```
 
 ```{r}
@@ -557,77 +423,15 @@ completeness_plot
 
 **Interpretation**
 
-Basic identification information is well recorded: every record has an email address, 96.4% have a full name and 94.1% have tags. Organisation information is recorded for 65.1% of records. City, preferred phone and state/region information are recorded for approximately one-third of contacts, while postcode coverage is 25.4%.
+Basic identification information is well recorded: email is available for all records, while 96.4% have a full name and 94.1% have tags. Organisation information is recorded for 65.1% of records, while phone and location fields are available for roughly one-quarter to one-third of the CRM.
 
-Membership plan and status have lower overall coverage, at 19.8% and 17.2%. This should not automatically be interpreted as poor data quality because the CRM includes contacts who may not be members.
+Membership fields have lower coverage, but this should not automatically be treated as poor data quality because not every CRM contact is necessarily a member. More generally, lower coverage may sometimes reflect that a field is not relevant to every contact.
 
-Differences in coverage may partly reflect how contacts enter the CRM: email and names are core identifiers, while organisation, phone and location information may not be required for every contact or entry process. Lower membership-field coverage is consistent with a broader contact population rather than only members. The export cannot confirm the reasons for missing information.
+**What does this mean for STAV?**
 
-**Why it matters to STAV**
+Missing organisation, phone and location information can limit school-contact analysis, audience segmentation and communication. STAV should prioritise improving these fields where they are relevant rather than aiming for 100% completion across every field.
 
-Missing organisation, phone and location information can make it harder to understand school-contact relationships, segment audiences and target communications. Improving these fields where relevant would also give STAV a clearer picture of who it reaches and where those contacts are located.
-
-**Limitation**
-
-Coverage measures whether information is recorded, not whether it is accurate or current. Not every field is necessarily relevant to every CRM contact. Therefore, low coverage does not automatically mean poor data quality.
-
-## 3.2 How accurate and current is the CRM data?
-
-**Business question**
-
-How much can the current CRM export tell us about whether the recorded information is valid and up to date?
-
-**Why analyse it?**
-
-Accurate and current contact information helps STAV communicate reliably and maintain useful membership and school records.
-
-**Method**
-
-Several simple technical checks were used to identify obvious issues in email formats, Australian postcodes and subscription dates.
-
-```{r}
-#| label: simple-validity-checks
-is_australian <- str_to_lower(str_squish(crm$country)) %in%
-  c("australia", "au", "aus")
-validity_results <- tibble(
-  Check = c("Invalid populated email format",
-            "Australian postcode values requiring review",
-            "Subscription end date before start date"),
-  `Issues detected` = c(
-    sum(!crm$email_format_valid, na.rm = TRUE),
-    sum(is_australian & !crm$australian_postcode_format_valid, na.rm = TRUE),
-    sum(!is.na(crm$subscription_start_date_clean) &
-        !is.na(crm$subscription_end_date_clean) &
-        crm$subscription_end_date_clean < crm$subscription_start_date_clean)
-  )
-)
-stopifnot(identical(validity_results$`Issues detected`, c(0L, 12L, 0L)))
-write_csv(validity_results, "data/analysis/CRM/02_analysis/crm_simple_validity_checks.csv", na = "")
-```
-
-**Result**
-
-```{r}
-knitr::kable(validity_results, align = c("l", "r"))
-```
-
-The postcode check is limited to records identified as Australian. The 12 records are review candidates, not confirmed incorrect addresses.
-
-**Interpretation**
-
-The selected checks found few obvious technical problems. No invalid email formats or reversed subscription dates were detected, while 12 Australian postcode values warrant review.
-
-However, passing these checks does not mean the CRM information is accurate or current. For example, a correctly formatted email address may still be outdated, and a valid-looking postcode may still be incorrect.
-
-**Why it matters to STAV**
-
-Outdated or incorrect information could lead to failed communication, misdirected school correspondence and unreliable geographic or membership reporting.
-
-**Limitation / What is needed**
-
-The current export cannot reliably establish whether contact details still reach the intended person, organisation affiliations and roles are current, addresses remain current, or membership information reflects current entitlement.
-
-Future CRM processes could record a last verified date and use email delivery/bounce data, staff or contact confirmation, and authoritative membership records. Record creation and administrative update dates are not evidence that contact information has been verified.
+**Note:** Coverage measures whether a value is recorded, not whether it is accurate or current.
 
 ## 3.3 How consistent are school names in the CRM?
 
