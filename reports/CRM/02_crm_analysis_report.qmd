@@ -433,19 +433,17 @@ Missing organisation, phone and location information can limit school-contact an
 
 **Note:** Coverage measures whether a value is recorded, not whether it is accurate or current.
 
-## 3.3 How consistent are school names in the CRM?
+# 4 School and Contact Structure
+
+## 4.1 How consistent are school names in the CRM?
 
 **Business question**
 
-How consistently are schools named in STAV's CRM?
-
-**Why analyse it?**
-
-The same school can appear under several company names because of spelling differences, abbreviations, campus references or other naming variations. These variations can split records belonging to the same school across different CRM labels.
+How consistently are schools named in STAV’s CRM?
 
 **Method**
 
-Fuzzy text matching identified potentially related CRM school names. The A and B columns were candidate names, not correct and incorrect versions; Catie reviewed each independently to identify the school it represented, with campus information recorded separately where applicable. The results were consolidated into a school master mapping: fuzzy matching generated review candidates, while Catie’s manual review determined school identity. No records were automatically merged.
+The reviewed school mapping was used to assess how many different CRM school names refer to the same approved school. Candidate matches were generated during the earlier review process, but the approved mapping reflects Catie’s manual review rather than automatic fuzzy matching. Campus information was recorded separately where available.
 
 ```{r}
 #| label: reviewed-organisation-mapping
@@ -551,9 +549,9 @@ organisation_examples <- organisation_variants |>
 write_csv(organisation_examples, "data/analysis/CRM/02_analysis/crm_organisation_mapping_examples.csv")
 ```
 
-**Result**
+**Results**
 
-The reviewed mapping contains **`r mapping_summary$Result[1]` approved schools** derived from **`r mapping_summary$Result[2]` distinct CRM school-name variations**. These schools represent the reviewed mapping population, not the total number of schools in the full CRM.
+The reviewed mapping contains **544 distinct CRM school-name variations representing 250 approved schools**. The table summarises the extent of naming variation and recorded campus information within this reviewed population.
 
 ```{r}
 knitr::kable(mapping_summary, align = c("l", "r"))
@@ -580,7 +578,7 @@ ggsave("reports/figures/CRM/crm_organisation_name_variations.png",
        organisation_variation_plot, width = 8, height = 4.6, dpi = 300)
 ```
 
-The examples show a few observed names, rather than every variation. Waverley Christian College remains one approved school in the mapping even where names refer to its Wantirna South and Narre Warren South campuses. Campus values are reproduced as recorded and still require validation; campuses are not counted as separate schools.
+The examples below illustrate how one approved school can appear under several CRM names. Campus information is shown as recorded in the reviewed mapping and does not mean that campuses are counted as separate approved schools.
 
 ```{r}
 knitr::kable(organisation_examples, align = c("l", "r", "l", "l"))
@@ -588,19 +586,13 @@ knitr::kable(organisation_examples, align = c("l", "r", "l", "l"))
 
 **Interpretation**
 
-The reviewed mapping shows substantial inconsistency in school naming: **`r mapping_summary$Result[3]` of the `r mapping_summary$Result[1]` approved schools (`r mapping_summary$Result[4]`)** have multiple CRM names. School data quality concerns both whether a name is recorded, as assessed in Section 3.1, and whether records referring to the same school use a consistent name. Without standardisation, contacts from the same school may be distributed across several CRM company names. These findings describe the reviewed population only.
+School naming is not consistent within the reviewed population: **160 of the 250 approved schools (64.0%) have more than one CRM name variation**. These variations can fragment school-level records and make it harder to analyse or manage contacts consistently.
 
-**Why it matters to STAV**
+The reviewed mapping provides a practical basis for future school-name standardisation and school-level analysis. It does **not** mean that the underlying CRM records have already been cleaned, merged or consolidated.
 
-Standardising school names helps bring together contacts belonging to the same school, Group Admins, Group Members, membership information and campuses. The reviewed school master mapping is intended to support later school-level CRM analysis once ambiguous names and campus details have been checked.
+**Note:** These findings describe the **reviewed school-name mapping population**, not necessarily every school represented in the CRM. **Nine CRM school names map to more than one approved school and require review before automatic linking.**
 
-**Limitation**
-
-The mapping covers schools included in the fuzzy-matching and manual-review process, not a complete register of all schools in the CRM. Fuzzy similarity identified candidates; final school identification was based on Catie’s manual review. **`r nrow(ambiguous_aliases)` CRM names map to more than one approved school name** and require further review before automatic linking. Campus information contains spelling, capitalisation and review-note issues requiring final validation and standardisation. Section 4 retains its existing CRM organisation-key grouping.
-
-# 4 School Membership and Contact Structure
-
-## 4.1 How many records are identified through school membership plans?
+## 4.2 How many records are identified through school membership plans?
 
 **Business question**
 
@@ -655,7 +647,7 @@ There are **630 records identified through a school group membership plan**, rep
 
 The membership plan provides the clearest available evidence of membership type. This is an analytical definition, rather than an authoritative STAV business rule, and does not establish current membership.
 
-## 4.2 What group roles are recorded among school membership contacts?
+## 4.3 What group roles are recorded among school membership contacts?
 
 Group roles were identified from recorded Group Admin and Group Member tags within the 630-record school-plan population.
 
@@ -717,9 +709,15 @@ school_role_plot
 
 Group Member only is the largest category. A total of 317 records have a Group Admin role, either alone or together with a Group Member role. The 83 records with neither recognised role tag may be useful to review where a role should be recorded; they do not necessarily lack a real role.
 
-## 4.3 Are school-contact relationships clearly recorded?
+## 4.4 Are school-contact relationships clearly recorded?
 
-The analysis checked organisation information on school-plan records and the role structure of linked organisation groups. For the organisation-level checks, all CRM contacts linked to those organisation keys were considered, so an administrator was not missed simply because their own record lacked a school plan.
+**Business question**
+
+How clearly are school contacts linked to organisations and group roles in the CRM?
+
+**Method**
+
+The analysis reviewed organisation links and recorded Group Admin and Group Member tags among school-related CRM records. These indicators describe how relationships are recorded in the CRM; they do not verify the actual structure of each school.
 
 ```{r}
 #| label: school-organisation-links
@@ -752,21 +750,17 @@ stopifnot(identical(school_link_issues$count, c(189L, 40L, 16L)),
 write_csv(school_link_issues, "data/analysis/CRM/02_analysis/crm_school_contact_link_review.csv", na = "")
 ```
 
-- **189 of the 630 school-plan records (30.0%)** have no organisation information recorded.
-- **40 organisation groups based on the CRM organisation key** have Group Members but no identifiable Group Admin.
-- **16 organisation groups** have multiple identifiable Group Admins.
+**Key findings**
 
-No identifiable administrator may reflect missing CRM information rather than a real absence. Multiple administrators may be legitimate. These findings identify records and groups worth reviewing, not confirmed errors.
+- **189 of the 630 school-plan records (30.0%) have no organisation recorded**, limiting the ability to link those contacts to a school.
+- **40 organisation-key groups have Group Members but no identifiable Group Admin** based on the recorded tags.
+- **16 organisation-key groups have multiple identifiable Group Admins**.
 
-These patterns may reflect incomplete organisation links, missing or outdated role tags, changes in school contacts, or membership and organisation information being maintained separately. An administrator could also be recorded elsewhere without a consistent link to the same organisation. The export cannot determine which explanation applies.
+**What does this mean for STAV?**
 
-**Why it matters to STAV**
+These results provide a practical review list for improving school-contact relationships in the CRM. Priority should be given to school-plan contacts without an organisation and organisation groups where recorded Admin and Member roles are unclear.
 
-Clearer organisation and role links can help STAV identify the appropriate school membership contact, communicate with schools more reliably, understand who administers and participates in group memberships, and maintain clearer school-contact relationships.
-
-**Limitation**
-
-The plan-based definition is analytical, not authoritative. There are 75 records with school-specific group-role tags but no school membership plan, so it may not capture every school-related contact. Counts represent CRM records, not verified people, schools or current memberships. Organisation keys are practical grouping tools, not authoritative school identifiers.
+**Note:** These are **review indicators, not confirmed CRM errors**. Organisation-key groups are not verified schools, missing organisation information does not prove that a contact has no school affiliation, and multiple Group Admins may be legitimate.
 
 # 5 Membership Analysis
 
