@@ -1,2 +1,5 @@
 /.quarto/
+/build/
+/Rplots.pdf
 **/*.quarto_ipynb
+!figures/school_name_distribution.csv
