@@ -1,4 +1,4 @@
-# Run from reports/presentation: Rscript make_figures.R
+# Run from presentation: Rscript make_figures.R
 # Aggregate values transcribed from the approved CRM and GA4 reports.
 # No contact-level data or live tracking configuration is read.
 library(ggplot2)
@@ -46,5 +46,12 @@ save_plot('content',p,w=10,h=5)
 d <- data.frame(event=factor(c('Form starts','Form submissions','File downloads'),levels=c('File downloads','Form submissions','Form starts')),n=c(20562,11890,9756))
 p <- ggplot(d,aes(n,event))+geom_col(fill=teal,width=.5)+geom_text(aes(label=format(n,big.mark=',',trim=TRUE)),hjust=-.12,size=6)+
  scale_x_continuous(limits=c(0,27000),breaks=c(0,10000,20000),labels=function(x)format(x,big.mark=',',trim=TRUE),expand=c(0,0))+
- labs(title='GA4 records substantial interaction activity',subtitle='Independent annual event totals, July 2025–June 2026',x='Recorded events')+base
+ labs(title='GA4 counts events, but not which form or file',subtitle='Independent annual event totals, July 2025–June 2026',x='Recorded events')+base
 save_plot('tracking',p)
+d <- data.frame(category=factor(c('Only a name','Name + organisation\nor phone'),levels=rev(c('Only a name','Name + organisation\nor phone'))),n=c(997,382),lab=c('997 (72%)','382 (28%)'))
+p <- ggplot(d,aes(n,category,fill=category=='Only a name'))+geom_col(width=.5,show.legend=FALSE)+geom_text(aes(label=lab),hjust=-.1,size=7)+
+ scale_fill_manual(values=c(navy,teal))+
+ scale_x_continuous(limits=c(0,1300),breaks=NULL,expand=c(0,0))+
+ labs(title='Most same-name records share only a name',subtitle='1,379 records that share a name with another record',x=NULL)+base+
+ theme(axis.text.y=element_text(size=20),panel.grid.major.x=element_blank(),plot.title.position='plot')
+save_plot('contact_review_simple',p,w=10,h=3.2)
