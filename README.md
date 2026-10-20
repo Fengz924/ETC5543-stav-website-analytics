@@ -26,48 +26,37 @@ Raw datasets and platform exports are excluded from this repository using `.giti
 
 Only sanitised documentation, reproducible analysis code, and approved non-sensitive outputs will be committed.
 
-## Project Status
+## Main Deliverables
 
-The main university component focuses on GA4 website analytics. The authoritative
-GA4 files are `R/ga4/GA4_Web_Analytics.R` and `reports/final_report.qmd`.
-They currently retain their separate analytical implementations.
-
-The Event audit is supporting analysis. CRM authority is unresolved: the files
-under `reports/CRM/` remain unchanged pending confirmation of the reorganised
-version. No presentation source has been identified or added. Meta and LinkedIn
-remain potential separate STAV deliverables rather than prerequisites for the
-GA4 report. No project software licence has been added yet.
+- [CRM data preparation and validation](reports/CRM/01_crm_data_preparation.qmd)
+- [CRM analysis report](reports/CRM/02_crm_analysis_report.qmd)
+- [GA4 website analysis report](reports/GA4/stav_website_report.qmd)
+- [Interactive CRM and GA4 dashboard](apps/stav-dashboard/README.md)
+- [Presentation and build instructions](presentation/README.md)
 
 ## Repository Structure
 
 ```text
 .
 ├── README.md
-├── .gitignore
 ├── _quarto.yml
 ├── ETC5543-stav-website-analytics.Rproj
-├── R/ga4/GA4_Web_Analytics.R
+├── R/
+│   ├── CRM/                       # CRM preparation and validation
+│   └── ga4/                       # GA4 analysis script
 ├── reports/
-│   ├── final_report.qmd
-│   ├── supporting/event_analysis.qmd
-│   ├── CRM/                       # Authority awaiting confirmation
-│   ├── ga4_analysis.qmd           # Legacy GA4 audit retained
-│   ├── ga4_analysis.html          # Existing output retained
-│   ├── ga4_analysis_files/        # Existing support assets retained
-│   └── event_analysis.html        # Existing output retained
-├── docs/
-│   ├── STAV_Master_Data_Inventory_Sanitized.xlsx
-│   ├── data_sources.md
-│   └── reproducibility.md
+│   ├── CRM/                       # Preparation and analysis reports
+│   ├── GA4/                       # Website analysis report
+│   └── figures/                   # Report figures
+├── presentation/                  # Quarto slides, theme and bundled charts
+├── apps/stav-dashboard/           # Shiny app, configuration and demo generator
+├── docs/                          # Source definitions and workflow documentation
 └── data/
-    ├── raw/                       # Local, ignored
-    ├── clean/                     # Local, ignored
-    ├── analysis/                  # Local, ignored
-    └── example/CRM/crm_contacts_synthetic.csv
+    ├── raw/                       # Private inputs, ignored
+    ├── clean/                     # Prepared private data, ignored
+    ├── analysis/                  # Derived private data, ignored
+    └── example/                   # Fictional example data
 ```
-
-Quarto creates ignored `outputs/build/` when rendering. Empty presentation,
-asset, and final-output directories are not included.
 
 ## Software and Execution
 
