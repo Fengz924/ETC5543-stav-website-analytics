@@ -477,8 +477,6 @@ A landing page is the first page viewed when a visitor enters the website. "(not
 
 The (not set) category accounted for 6,566 sessions (7.2%), it represents sessions for which GA4 did not assign a landing-page value. Upon further checking in GA4, page-path information could be associated with this category, with prominent paths including /science-talent-search/, /sts-resources/ and the homepage. However, these paths should not be interpreted as confirmed landing pages, as GA4 did not assign a landing-page value to these sessions.
 
-
-
 ## Website Content
 
 ```{r}
@@ -827,7 +825,6 @@ Science Talent Search showed the largest monthly variation, reaching **10,082 vi
 
 These differences indicate that demand for STAV's content and activities varies substantially throughout the year. The timing may reflect STAV's program, event and resource schedules; however, GA4 page-view data alone cannot determine the specific cause of each increase.
 
-
 ## Website and Community Functions
 
 The second chart focuses on general website navigation, account, membership, organisation and community functions.
@@ -912,7 +909,6 @@ monthly_content %>%
 
 The Homepage reached its highest monthly level in **February 2026 with 2,766 views**, while Account pages peaked earlier in **August 2025 with 2,900 views**. Membership also reached its highest level in **February 2026 with 735 views**. These patterns show that the use of general website functions also changed across the year rather than remaining constant.
 
-
 ## Peak and Lowest Months
 
 The table below summarises the highest and lowest monthly page-view levels for each business-relevant content category.
@@ -979,10 +975,10 @@ knitr::kable(
 )
 ```
 
-
 # Audience and Devices
 
 ## New and Returning Users
+
 ```{r}
 #| label: fig-new-returning-users
 #| fig-width: 8
@@ -1020,12 +1016,12 @@ ggplot(user_type, aes(x = reorder(user_type, users), y = users)) +
     panel.grid.minor = element_blank()
   )
 ```
+
 During the reporting period from **1 July 2025 to 30 June 2026**, GA4 recorded approximately **54,000 new users** and **9,300 returning users**. The figures indicate that the website reached a large number of new users during the year, alongside a smaller but notable returning audience.
 
 New and returning users are not mutually exclusive in GA4. A user may first be counted as a new user and later also be counted as a returning user if they revisit the website. Therefore, these figures should not be added together to estimate total users.
 
 The higher number of new users may partly reflect visitors discovering STAV through search engines when looking for specific events, resources or Science Talent Search information. Returning users may include visitors who revisit the website for ongoing activities such as accessing resources, checking events or using account functions. These are possible explanations based on the observed traffic and content patterns， GA4 does not directly identify why individual users return to the website.
-
 
 ## Device Category
 
@@ -1295,8 +1291,6 @@ An event is recorded when a tracked interaction occurs on the website. Event cou
 
 These results show substantial use of website content and functions. However, through the currently available GA4 reporting, it is not possible to identify the specific forms or files associated with these events. As a result, the analysis cannot directly determine which STAV services, resources or activities generated these interactions.
 
-
-
 # Recent User Journey Exploration
 
 This supplementary analysis uses GA4 Path Exploration to examine recent website navigation behaviour. As historical Exploration data was not available for the main reporting period, the analysis uses the currently available period from 1 August to 30 September 2026.
@@ -1325,10 +1319,8 @@ Using /science-talent-search/ as the starting point, the most common next-page p
 knitr::include_graphics("../figures/ga4_homepage_path_exploration_aug_sep_2026.png", error = FALSE)
 ```
 
+Using the homepage (/) as the starting point, GA4 recorded 3,761 events at this node during the exploration period. The most common next-page paths included /testing-redirect-a/ (292 events), /my-account/ (235), /events/ (134), /science-talent-search/ (132), /publications/trial-exams/ (126) and /become-a-member/ (83). The results show that users navigating beyond the homepage moved across several important STAV functions and content areas, including account access, events, Science Talent Search, publications and membership. This suggests that the homepage acts as a navigation point to multiple areas of the website rather than directing users primarily toward a single content area. These figures represent path events in GA4 Exploration rather than unique users.
 
-Using the homepage (/) as the starting point, GA4 recorded 3,761 events at this node during the exploration period. The most common next-page paths included /testing-redirect-a/ (292 events), /my-account/ (235), /events/ (134), /science-talent-search/ (132), /publications/trial-exams/ (126) and /become-a-member/ (83).
-The results show that users navigating beyond the homepage moved across several important STAV functions and content areas, including account access, events, Science Talent Search, publications and membership. This suggests that the homepage acts as a navigation point to multiple areas of the website rather than directing users primarily toward a single content area.
-These figures represent path events in GA4 Exploration rather than unique users.
 # Measurement and Data Limitations
 
 The analysis identified several limitations in the current GA4 measurement setup. These limitations do not prevent the website data from being useful, but they affect how some results should be interpreted.
@@ -1347,9 +1339,7 @@ These records indicate that some website activity could not be assigned to an id
 
 ### Key Events were not recorded
 
-Key Events are not currently configured around active website interactions
-Upon checking the GA4 property directly, a range of recent website events were identified, including form_submit, file_download, click, scroll and video interactions. However, none of these recently active events are currently marked as Key Events. The only Key Event listed in GA4 is purchase, for which no recent stream data was detected.
-This limits the ability to distinguish routine website interactions from actions that STAV considers meaningful organisational outcomes.
+Key Events are not currently configured around active website interactions Upon checking the GA4 property directly, a range of recent website events were identified, including form_submit, file_download, click, scroll and video interactions. However, none of these recently active events are currently marked as Key Events. The only Key Event listed in GA4 is purchase, for which no recent stream data was detected. This limits the ability to distinguish routine website interactions from actions that STAV considers meaningful organisational outcomes.
 
 ### Behaviour events lack business context
 
@@ -1361,7 +1351,8 @@ For example, the data shows that file-download events occurred 9,756 times, but 
 
 GA4 provides report-level counts of new and returning users for the full reporting period. However, detailed historical comparisons of their engagement behaviour could not be conducted because the required data falls outside the property's available GA4 Exploration data-retention window.
 
-###  Historical User Journey Analysis
+### Historical User Journey Analysis
+
 A detailed analysis of where users navigated next or exited the website could not be reproduced for the full reporting period using the currently available GA4 data. Historical path-level analysis would require Exploration data beyond what is currently available in the property's data-retention window.
 
 # Recommendations
