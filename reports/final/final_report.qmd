@@ -1,0 +1,899 @@
+---
+title: "Turning STAV's Existing Data into Better Decisions"
+subtitle: "CRM data quality, website analytics and an interactive dashboard for the Science Teachers' Association of Victoria"
+author: "Feng Zhu"
+date: "2026-10-30"
+abstract: |
+  The Science Teachers' Association of Victoria (STAV) holds two rich but under-used data sources: a CRM of contact, school and membership records, and Google Analytics 4 (GA4) data for its website. This project asked how STAV can use the data it already has to make better decisions. Working with a snapshot of 6,051 CRM records and a year of GA4 exports (July 2025 to June 2026), I audited CRM completeness, potential duplicates, school-contact links and membership fields; standardised 544 inconsistent CRM school names into 250 reviewed schools using an edit-distance matching rule followed by manual review; analysed how visitors reach and use the website; and built a Shiny dashboard so STAV staff can explore the results without code. The CRM is a usable foundation but cannot yet support reliable school-level, membership or engagement reporting: organisation, phone and location fields are largely missing, almost one in four records shares a name with another record, and 49 records are marked Active after their end date. On the website, search and Science Talent Search content drive much of the activity, but GA4 does not currently record which forms or files are used. The report closes with phased recommendations for data governance, audience segmentation and engagement measurement.
+
+  **GitHub repository:** <https://github.com/Fengz924/ETC5543-stav-website-analytics>
+format:
+  typst:
+    toc: true
+    toc-depth: 2
+    section-numbering: "1.1"
+    papersize: a4
+    margin:
+      x: 2.2cm
+      y: 2.2cm
+    fontsize: 10.5pt
+    fig-format: png
+    citeproc: true
+bibliography: references.bib
+execute:
+  echo: false
+  warning: false
+  message: false
+---
+
+```{r}
+#| label: setup
+#| include: false
+here::i_am("reports/final/final_report.qmd")
+knitr::opts_knit$set(root.dir = here::here())
+knitr::opts_chunk$set(fig.width = 7, fig.height = 3.3, dpi = 300,
+                      out.width = "100%", fig.align = "center")
+
+suppressPackageStartupMessages({
+  library(tidyverse)
+  library(janitor)
+  library(naniar)
+  library(knitr)
+})
+
+# Number formatting helpers for inline results
+cm <- function(x) scales::comma(as.numeric(x), accuracy = 1)
+pc <- function(x, digits = 1) scales::percent(as.numeric(x), accuracy = 10^-digits)
+
+# One visual style for every figure: a single highlight colour, grey context
+stav_navy <- "#075579"
+stav_teal <- "#087e8b"
+stav_grey <- "#c5d1d8"
+stav_ink  <- "#253342"
+theme_stav <- function(base_size = 10) {
+  theme_minimal(base_size = base_size, base_family = "sans") +
+    theme(
+      panel.grid.major.y = element_blank(),
+      panel.grid.minor = element_blank(),
+      panel.grid.major.x = element_line(colour = "#e5eaee"),
+      axis.text = element_text(colour = stav_ink),
+      axis.title = element_text(colour = "#596575", size = rel(0.9)),
+      plot.title = element_text(face = "bold", colour = stav_navy, size = rel(1.1)),
+      plot.subtitle = element_text(colour = "#596575", margin = margin(b = 8)),
+      plot.title.position = "plot",
+      legend.position = "top",
+      legend.justification = "left",
+      legend.title = element_blank(),
+      plot.margin = margin(6, 14, 6, 6)
+    )
+}
+```
+
+```{r}
+#| label: load-crm
+#| include: false
+# CRM: aggregate summaries written by reports/CRM/02_crm_analysis_report.qmd,
+# plus selected fields of the validated clean CRM for missingness analysis.
+crm_dir <- "data/analysis/CRM/02_analysis"
+read_summary <- function(file) {
+  read_csv(file.path(crm_dir, file), show_col_types = FALSE, progress = FALSE)
+}
+dup_summary   <- read_summary("crm_duplicate_summary.csv")
+dup_category  <- read_summary("crm_duplicate_review_categories.csv")
+map_summary   <- read_summary("crm_organisation_mapping_summary.csv")
+name_dist     <- read_summary("crm_organisation_name_distribution.csv")
+map_examples  <- read_summary("crm_organisation_mapping_examples.csv")
+school_roles  <- read_summary("crm_school_contact_roles.csv")
+school_links  <- read_summary("crm_school_contact_link_review.csv")
+status_chart  <- read_summary("crm_membership_status_chart.csv")
+member_review <- read_summary("crm_membership_review_indicators.csv")
+
+key_fields <- c(
+  email = "Email", full_name = "Full name", tags = "Tags",
+  company_name = "Organisation", city = "City",
+  preferred_phone = "Preferred phone", region = "State / region",
+  postal_zip = "Postcode", membership_plan = "Membership plan",
+  membership_status = "Membership status"
+)
+crm <- read_csv(
+  "data/clean/CRM/restricted/crm_contacts_clean.csv",
+  col_select = all_of(c(names(key_fields), "email_key", "email_format_valid",
+                       "job_title_position", "your_role",
+                       "do_you_hold_an_identified_leadership_role", "region_clean")),
+  col_types = cols(.default = col_character()), na = "",
+  show_col_types = FALSE, progress = FALSE
+)
+stopifnot(nrow(crm) == 6051L)
+n_crm <- nrow(crm)
+
+crm_fields <- crm |>
+  select(all_of(names(key_fields))) |>
+  rename_with(~ unname(key_fields[.x]))
+miss_summary <- miss_var_summary(crm_fields)
+miss_of <- function(field) miss_summary$pct_miss[miss_summary$variable == field] / 100
+complete_share <- mean(complete.cases(crm_fields))
+location_all_missing <- mean(is.na(crm$city) & is.na(crm$region) & is.na(crm$postal_zip))
+
+email_valid_share <- mean(crm$email_format_valid == "TRUE")
+
+# Fields that could support segmentation by role, school type and location
+position_share   <- mean(!is.na(crm$job_title_position))
+position_values  <- n_distinct(crm$job_title_position, na.rm = TRUE)
+your_role_share  <- mean(!is.na(crm$your_role))
+leadership_share <- mean(!is.na(crm$do_you_hold_an_identified_leadership_role))
+metro_regional_n <- sum(crm$region_clean %in% c("Metro", "Country"))
+email_domain <- str_extract(crm$email_key, "@.*$")
+education_domain_share <- mean(str_detect(email_domain, "(\\.edu\\.au|education\\.vic\\.gov\\.au)$"))
+govt_domain_share <- mean(str_detect(email_domain, "education\\.vic\\.gov\\.au$"))
+personal_domain_share <- mean(str_detect(
+  email_domain, "@(gmail|hotmail|yahoo|outlook|bigpond|icloud|live|me)\\."
+))
+
+name_candidates <- dup_summary$affected_records[dup_summary$duplicate_check == "Same name"]
+name_groups     <- dup_summary$groups[dup_summary$duplicate_check == "Same name"]
+same_name_only  <- dup_category$records[dup_category$category == "Same name only"]
+
+result_of <- function(measure) map_summary$Result[map_summary$Measure == measure]
+n_approved   <- as.integer(result_of("Approved schools represented in reviewed mapping"))
+n_variants   <- as.integer(result_of("Distinct CRM school-name variations"))
+n_multi      <- as.integer(result_of("Schools with multiple CRM names"))
+max_variants <- as.integer(result_of("Maximum CRM-name variations for one school"))
+
+school_plan_n <- sum(school_roles$records)
+no_org <- school_links$count[str_detect(school_links$finding, "without organisation")]
+active_past_end <- member_review$Records[str_detect(member_review$`Review indicator`, "^Active")]
+role_of <- function(role) school_roles$records[school_roles$group_role == role]
+plan_counts   <- read_summary("crm_membership_plan_counts.csv")
+status_counts <- read_summary("crm_membership_status_counts.csv")
+n_plan <- sum(plan_counts$records)
+review_of <- function(pattern) member_review$Records[str_detect(member_review$`Review indicator`, pattern)]
+plan_no_status <- review_of("^Membership plan recorded")
+status_no_plan <- review_of("^Membership status recorded")
+n_onhold <- status_counts$records[status_counts$status_key == "on-hold"]
+n_status <- sum(status_chart$records)
+n_active <- status_chart$records[status_chart$status == "Active"]
+```
+
+```{r}
+#| label: load-matching
+#| include: false
+# School-name candidate pairs and the supervisor's review decisions.
+candidates <- read_csv(
+  "data/analysis/CRM/organisation_mapping/restricted/crm_school_name_fuzzy_candidates_review.csv",
+  col_types = cols(.default = col_character()), show_col_types = FALSE, progress = FALSE
+) |>
+  filter(display_name_a != "display_name_a")   # drop a repeated header row
+
+normalise_name <- function(x) {
+  str_squish(str_replace_all(str_to_lower(x), "[^a-z0-9 ]", ""))
+}
+reviewed <- candidates |>
+  mutate(
+    a = normalise_name(display_name_a), b = normalise_name(display_name_b),
+    distance = diag(adist(a, b)),
+    norm_distance = distance / pmax(nchar(a), nchar(b)),
+    recorded_norm = as.numeric(normalised_edit_distance),
+    containment = one_name_contains_the_other == "TRUE",
+    rule = if_else(containment, "One name contains the other",
+                   "Similar spelling only (distance ≤ 0.20)"),
+    approved_a = str_to_lower(str_squish(`CH suggest name based on review of Column A`)),
+    approved_b = str_to_lower(str_squish(`CH suggest name based on review of Column B`)),
+    same_school = approved_a == approved_b
+  )
+n_pairs <- nrow(reviewed)
+reproduced_share <- mean(abs(reviewed$norm_distance - reviewed$recorded_norm) < 1e-6)
+decided <- filter(reviewed, !is.na(same_school))
+precision_all <- mean(decided$same_school)
+rule_table <- decided |>
+  group_by(rule) |>
+  summarise(pairs = n(), confirmed = sum(same_school), .groups = "drop") |>
+  mutate(precision = confirmed / pairs)
+band_table <- decided |>
+  filter(!containment) |>
+  mutate(band = cut(norm_distance, c(-Inf, 0.10, 0.15, 0.20),
+                    labels = c("0.00–0.10", "0.10–0.15", "0.15–0.20"))) |>
+  group_by(band) |>
+  summarise(pairs = n(), confirmed = sum(same_school), .groups = "drop") |>
+  mutate(precision = confirmed / pairs)
+max_norm_distance_only <- max(reviewed$norm_distance[!reviewed$containment])
+```
+
+```{r}
+#| label: load-ga4
+#| include: false
+read_ga4 <- function(file) {
+  read_csv(file.path("data/raw/GA4", file), skip = 9,
+           show_col_types = FALSE, progress = FALSE) |>
+    clean_names()
+}
+channels      <- read_ga4("traffic_channel_20250701_20260630.csv")
+monthly       <- read_ga4("traffic_channel_monthly_20250701_20260630.csv")
+landing       <- read_ga4("landing_page_20250701_20260630.csv")
+pages         <- read_ga4("pages_screens_page_path_20250701_20260630.csv")
+monthly_pages <- read_ga4("pages_screens_page_path_month_20250701_20260630.csv")
+device        <- read_ga4("device_category_20250701_20260630.csv")
+country       <- read_ga4("country_20250701_20260630.csv")
+events        <- read_ga4("events_20250701_20260630.csv")
+
+# GA4 exports record month as "01"-"12" without a year; the period is Jul 2025-Jun 2026.
+month_date <- function(m) {
+  m <- as.integer(m)
+  lubridate::ymd(sprintf("%d-%02d-01", if_else(m >= 7, 2025L, 2026L), m))
+}
+
+# Use the dashboard's page rules so the report and the app classify pages identically.
+source("apps/stav-dashboard/R/content.R", local = TRUE)
+
+active_users_total   <- 55599   # GA4 report-level Active Users (not additive across rows)
+landing_report_total <- 91062   # GA4 report-level sessions in the landing-page report
+
+channel_name <- "session_primary_channel_group_default_channel_group"
+channels <- channels |>
+  rename(channel = all_of(channel_name)) |>
+  mutate(share = sessions / sum(sessions))
+ch <- function(name, col) channels[[col]][channels$channel == name]
+
+monthly_total <- monthly |>
+  mutate(date = month_date(month)) |>
+  group_by(date) |>
+  summarise(sessions = sum(sessions), engaged = sum(engaged_sessions), .groups = "drop")
+peak_month <- monthly_total |> slice_max(sessions, n = 1)
+low_month  <- monthly_total |> slice_min(sessions, n = 1)
+
+landing_cat <- landing |>
+  mutate(category = if_else(landing_page == "(not set)", "Not set",
+                            classify_page(landing_page))) |>
+  group_by(category) |>
+  summarise(sessions = sum(sessions), .groups = "drop") |>
+  mutate(share = sessions / landing_report_total)
+page_cat <- pages |>
+  mutate(category = classify_page(page_path_and_screen_class)) |>
+  group_by(category) |>
+  summarise(views = sum(views), .groups = "drop") |>
+  mutate(share = views / sum(views))
+total_views <- sum(pages$views)
+top100_share <- pages |> slice_max(views, n = 100, with_ties = FALSE) |>
+  summarise(s = sum(views)) |> pull(s) / total_views
+lc <- function(cat) landing_cat$share[landing_cat$category == cat]
+pv <- function(cat, col = "share") page_cat[[col]][page_cat$category == cat]
+
+sts_monthly <- monthly_pages |>
+  mutate(date = month_date(month), category = classify_page(page_path_and_screen_class)) |>
+  filter(category == "Science Talent Search") |>
+  group_by(date) |>
+  summarise(views = sum(views), .groups = "drop")
+sts_peak <- slice_max(sts_monthly, views, n = 1)
+sts_low  <- slice_min(sts_monthly, views, n = 1)
+
+ev <- function(name) events$event_count[events$event_name == name]
+
+source_medium <- read_ga4("traffic_source_medium_20250701_20260630.csv")
+sm <- function(name) source_medium$sessions[source_medium$session_source_medium == name]
+search_total <- ch("Organic Search", "sessions")
+
+category_peaks <- monthly_pages |>
+  mutate(date = month_date(month), category = classify_page(page_path_and_screen_class)) |>
+  group_by(category, date) |>
+  summarise(views = sum(views), .groups = "drop") |>
+  group_by(category) |>
+  slice_max(views, n = 1, with_ties = FALSE) |>
+  ungroup()
+peak_of <- function(cat, col) category_peaks[[col]][category_peaks$category == cat]
+other_view_share <- pv("Other")
+dev <- function(name, col) device[[col]][device$device_category == name]
+device_total <- sum(device$active_users)
+country_total <- sum(country$active_users)
+aus_user_share <- country$active_users[country$country == "Australia"] / country_total
+aus_event_share <- country$event_count[country$country == "Australia"] / sum(country$event_count)
+```
+
+# Introduction
+
+## STAV and why its data matters
+
+The Science Teachers' Association of Victoria (STAV) is a professional organisation that supports science educators across Victoria through memberships, professional development, conferences and educational programs, including the Science Talent Search (STS) student competition. Through these activities STAV aims to strengthen science education, support teachers and connect the science education community.
+
+Two data sources sit behind this work. The first is a CRM database of contacts, schools and memberships, which supports communication, membership administration, event promotion and engagement with educators. The CRM is managed in WordPress; its data were migrated from an earlier platform and, although they have been tidied since, inconsistencies remain. The second is Google Analytics 4 (GA4), which records how people reach and use the STAV website, the main channel through which teachers and students find programs, register for events and access resources.
+
+Both sources are collected routinely, but neither had been examined systematically. STAV therefore could not answer some basic questions with confidence: how many contacts or members each school has, whether a contact's membership is current, which website content matters most, or whether important website actions are being recorded. This placement project set out to close that gap.
+
+## Business problems and research questions
+
+STAV raised two practical problems. First, it could not get reliable answers from its CRM, for example about school-level contacts and memberships, because the same school appears under many names and many records are incomplete or inconsistent. Second, it had a year of GA4 data but it was not clear what the data meant for decisions about the website, such as which pages to maintain and whether important actions are tracked.
+
+These problems were translated into four research questions. Throughout the report they are referred to by number as RQ1 to RQ4 (RQ = research question), and each results section states which question it answers:
+
+- **RQ1 – CRM reliability.** How complete and consistent are STAV's contact, school and membership records, and which records most need review?
+- **RQ2 – School standardisation.** Can inconsistent CRM school names be standardised reliably, and how much human review does that require?
+- **RQ3 – Website use and measurement.** How do people reach and use the STAV website, and what can GA4, as currently configured, tell STAV about outcomes?
+- **RQ4 – Ongoing access.** How can these findings be made available to STAV staff in a form they can explore without writing code?
+
+## Contributions
+
+The project makes four contributions. (1) A **reproducible CRM audit** that quantifies completeness, potential duplicates, school-contact links and membership inconsistencies, presented as prioritised review lists rather than automatic corrections. (2) A **reviewed school-name mapping** that links `r cm(n_variants)` CRM name variations to `r n_approved` approved schools, with a measured precision for the matching rule. (3) A **website analysis** that regroups GA4 page data into STAV's own business categories, combines a full year of monthly data, and audits what the current tracking can and cannot measure. (4) A **Shiny dashboard** that validates its inputs and lets staff filter, compare months and export results.
+
+What the project adds beyond the tools STAV already has is summarised in @tbl-beyond-ga4. GA4's standard reports describe individual pages, channels and events, but they do not know which pages belong to the STS program, cannot audit their own configuration, and do not connect to the CRM. Similarly, the CRM shows individual records but not the patterns of missingness and inconsistency across them.
+
+```{r}
+#| label: tbl-beyond-ga4
+#| tbl-cap: "What this project adds to what STAV could already see in GA4 and the CRM."
+#| tbl-colwidths: [22, 34, 44]
+tribble(
+  ~Aspect, ~`What STAV could see before`, ~`What this project adds`,
+  "Content grouping", "Thousands of individual page paths", "Pages grouped into business categories such as STS, Events and Membership",
+  "Time view", "Ad-hoc date ranges in the interface", "A full year of monthly data with month-on-month comparison",
+  "Measurement quality", "Shows recorded events, not what is missing", "Audit of event detail, Key Events and '(not set)' traffic",
+  "CRM quality", "One record at a time", "Field-level missingness, duplicate candidates and membership review lists",
+  "School consistency", "Free-text school names", "Reviewed mapping of 544 names to 250 schools",
+  "Access for staff", "Separate systems and expertise required", "One dashboard with filters, comparisons and CSV export"
+) |>
+  kable()
+```
+
+## A single thread: schools and teachers
+
+Although the CRM and GA4 data cannot be linked at the level of individuals, they describe the same community. The CRM tells STAV *who* its contacts are, largely teachers attached to schools; the website shows *what* that community looks for, above all Science Talent Search and events. The weaknesses in both sources point to the same gap: STAV cannot yet connect who people are with what they do. The report therefore first answers RQ1 and RQ2 using the CRM (@sec-crm), then RQ3 using the website data (@sec-web), and RQ4 with the dashboard (@sec-dashboard). It then brings the findings together into one set of strategic recommendations (@sec-strategy).
+
+# Data
+
+## CRM snapshot
+
+The CRM data are a single export dated **29 July 2026** containing `r cm(n_crm)` records and 71 source fields, covering contact details, organisation, location, tags, membership plan and status, subscription dates and consent fields. The unit of analysis is a CRM *record*. A record is not the same as a verified person, a school or a membership: one person may hold several records, and a recorded Active status does not establish a current or engaged relationship. Because the export contains personal information, it is kept outside Git, and this report shows only aggregate results and organisation names.
+
+The fields fall into four groups. Identity fields (name, email and CRM ID) are needed for communication. Organisation and location fields (company, city, region and postcode) are needed to attribute contacts to schools and areas. Membership fields (plan, status, start and end dates, cancellation) support administration. Administrative fields (tags, consent dates and notes) record roles and permissions. The migration from the previous platform left traces in all four groups. School names were entered as free text, several date fields use mixed formats, and role information such as Group Admin and Group Member is stored in a free-text tag field rather than a structured column. The export is therefore a realistic example of an operational system that has grown over time rather than a database designed for analysis.
+
+## GA4 exports
+
+Website data were exported from STAV's GA4 property for **1 July 2025 to 30 June 2026** as separate reports: traffic by channel (annual and monthly), source/medium, landing pages, pages and screens (annual and monthly), device category, country and events. Each export begins with nine lines of report metadata (report name, account, property and date range), followed by a table. Key GA4 terms are used as defined by Google: a *session* is a period of interaction and one person can generate several; an *engaged session* lasts longer than 10 seconds, includes a Key Event or has at least two page views [@ga4-engagement]; *Direct* means no referring source was identified [@ga4-channels]; and a *Key Event* is an action the property owner marks as important [@ga4-keyevents]. GA4 reported `r cm(active_users_total)` Active Users for the year. Active Users are not additive across pages, devices or countries, because the same person can appear in several rows.
+
+## Why the two sources are analysed separately
+
+The CRM and GA4 differ in unit (record versus session or event), time frame (a snapshot versus a year) and identity: GA4 contains no identifier that can be matched to a CRM contact. The two sources are therefore analysed separately, and no claim is made that website activity caused any membership outcome.
+
+# Methods
+
+## CRM preparation and validation
+
+All processing used R [@R-base] with the tidyverse [@tidyverse]. Preparation followed tidy-data principles [@wickham2014tidy] and preserved the original values alongside cleaned versions. Column names were standardised with `janitor::clean_names()` [@janitor]; extra whitespace was removed with `str_squish()`; empty strings were converted to missing values with `na_if()`; emails, names and phone numbers were normalised with `str_to_lower()` and `str_replace_all()` to create matching keys; and dates were parsed with `parse_date_time()` from lubridate [@lubridate]. Questionable records were flagged rather than deleted.
+
+The most difficult step was importing the export correctly. Notes fields contain JSON with two kinds of embedded quote: doubled CSV quotes and literal backslash-quote sequences. Default parsers disagreed: one reported 3 problem records and another split 59 records into too many fields. I wrote a strict parser that decodes doubled quotes, preserves backslash-quote content and rejects malformed boundaries. I then confirmed that independent R and Python readers recover identical values from its canonical output for all `r cm(n_crm)` records and 71 fields. The source file's checksum is verified on every run, so a changed export cannot silently refresh the results.
+
+## Assessing CRM quality
+
+**Completeness.** Missingness was analysed with naniar [@naniar], which treats missing values as data in their own right, making it possible to summarise and visualise which fields are missing and which go missing together. The distinction matters for interpretation. If values were missing at random, the records with complete information could stand in for the rest. If instead whole groups of fields were never collected for certain kinds of contact, analysis based only on complete records would describe a biased subset of STAV's community. Looking at which fields go missing together is a simple way to tell these situations apart.
+
+**Potential duplicates.** Exact duplicate rows, repeated CRM IDs and repeated normalised emails were checked first. Records sharing a normalised first-and-last-name combination were then treated as *candidates*. Each candidate was assigned to one category according to the strongest supporting evidence: matching organisation, matching usable phone number, or both. This evidence ladder prioritises manual review; it does not confirm identity, because names, organisations and phones can legitimately be shared [@christen2012]. Comparing every record with every other record would require more than 18 million comparisons. Using the normalised name as a *blocking key*, a standard record-linkage technique, restricts comparisons to records that already share a name. This keeps the check fast and makes each candidate pair easy to explain to the staff who will review it.
+
+**School-contact links and membership.** School group members were identified from the three school group membership plans. The analysis then counted three indicators: school-plan records without an organisation, organisation groups without an identifiable Group Admin, and records whose membership status and subscription dates disagree.
+
+## Standardising school names
+
+School names are free text, so exact matching misses spelling variants. Each name was first normalised (lower case, punctuation removed, single spaces). For two normalised names $a$ and $b$, the Levenshtein distance $d_{\text{Lev}}(a,b)$ is the minimum number of single-character insertions, deletions or substitutions needed to turn one into the other [@levenshtein1966]. To compare names of different lengths, the distance was scaled by the longer name:
+
+$$
+\tilde d(a,b) = \frac{d_{\text{Lev}}(a,b)}{\max(|a|,|b|)} .
+$$
+
+A pair was flagged as a candidate if $\tilde d(a,b) \le 0.20$ (no more than about one character in five differs) or if one name contained the other (for example, a short name inside a name that adds a campus). The candidates were exported with `write_csv()`, and my supervisor at STAV reviewed every pair and recorded the approved school and any campus. The approved mapping, not the algorithm, decides which names belong together. To check the implementation, the report recomputes each distance with base R's `adist()`. `r pc(reproduced_share)` of the recorded values are reproduced exactly; the small remainder reflects minor normalisation differences in the original candidate step.
+
+## Processing GA4 data
+
+Each export was read with `read_csv(skip = 9)` to remove the metadata lines, and its columns were standardised with `clean_names()`. Monthly exports record the month as a number without a year, so months were converted to dates with `as.integer()`, `if_else()` and `ymd()`, using the fact that the period runs from July 2025 to June 2026. Page paths were assigned to business categories with ordered regular-expression rules (`str_detect()` inside `case_when()`, first match wins; Appendix @sec-rules). The same rules are used by the dashboard, so the report and the app always agree. Rules are ordered from the most specific to the most general, because some paths match several patterns; for example, an STS event page must be counted as STS rather than as a generic event. As a robustness check, the share of page views that no rule captures (the "Other" category) is `r pc(other_view_share)` of all page views, so the categories describe almost all of the website's activity. Views and sessions were summarised with `group_by()` and `summarise()`, and `complete()` filled month-by-category combinations that had no views so that monthly trends could be compared. Shares of landing-page sessions use GA4's report-level total as the denominator, and Active Users are reported only at report level.
+
+## Dashboard design
+
+The dashboard was built with shiny [@shiny], bslib [@bslib], ggplot2 [@ggplot2] and DT [@DT]; its design is described in @sec-dashboard. The report itself was produced with Quarto [@quarto] and knitr [@knitr], with file paths managed by here [@here].
+
+# Results: the CRM (RQ1 and RQ2) {#sec-crm}
+
+## How many records, and how many might be duplicates?
+
+The CRM contains `r cm(n_crm)` records. No exact duplicate rows, repeated CRM IDs or repeated normalised emails were found, so every record is technically distinct. However, `r cm(name_candidates)` records (`r pc(name_candidates / n_crm)`, almost one in four) share a name with at least one other record, forming `r cm(name_groups)` same-name groups. @fig-duplicates shows that most of these have no further supporting evidence.
+
+```{r}
+#| label: fig-duplicates
+#| fig-cap: "Same-name candidate records by strongest supporting evidence. Most candidates share only a name, so identity must be confirmed before any merge."
+#| fig-height: 2.4
+dup_category |>
+  mutate(category = factor(category, levels = rev(category)),
+         highlight = category == "Same name only") |>
+  ggplot(aes(records, category, fill = highlight)) +
+  geom_col(width = 0.6, show.legend = FALSE) +
+  geom_text(aes(label = cm(records)), hjust = -0.15, size = 3.3, colour = stav_ink) +
+  scale_fill_manual(values = c(`TRUE` = stav_navy, `FALSE` = stav_grey)) +
+  scale_x_continuous(expand = expansion(mult = c(0, 0.12))) +
+  labs(x = "Candidate records", y = NULL) +
+  theme_stav()
+```
+
+`r cm(same_name_only)` candidates (`r pc(same_name_only / name_candidates, 0)`) share only a name. These could be one person with two email addresses or two colleagues with the same name. The candidates that also share an organisation or phone are the best place to start a manual review, but no record should be merged or deleted on this evidence alone.
+
+## How complete is the key contact information?
+
+@fig-missingness shows the share of records missing each of ten key fields. Identification fields are almost complete: every record has an email and only `r pc(miss_of("Full name"))` lack a full name. Organisation is missing for `r pc(miss_of("Organisation"))` of records, and phone and location fields for roughly two-thirds to three-quarters. Only `r pc(complete_share)` of records have all ten fields recorded.
+
+```{r}
+#| label: fig-missingness
+#| fig-cap: "Share of CRM records missing each key field, computed with naniar's miss_var_summary(). Membership fields are expected to be missing for non-members; organisation, phone and location gaps limit school-level reporting and segmentation."
+#| fig-height: 3.2
+miss_summary |>
+  mutate(pct = as.numeric(pct_miss) / 100,
+         variable = fct_reorder(variable, pct)) |>
+  ggplot(aes(pct, variable)) +
+  geom_segment(aes(x = 0, xend = pct, yend = variable), colour = stav_navy, linewidth = 0.7) +
+  geom_point(colour = stav_navy, size = 2.2) +
+  geom_text(aes(label = pc(pct)), hjust = -0.3, size = 3.1, colour = stav_ink) +
+  scale_x_continuous(labels = scales::percent, limits = c(0, 1),
+                     expand = expansion(mult = c(0, 0.02))) +
+  labs(x = "Records missing", y = NULL) +
+  theme_stav()
+```
+
+Missingness also clusters. All three location fields (city, region and postcode) are missing together for `r pc(location_all_missing)` of records, which suggests these fields were never collected for many contacts rather than lost at random. Membership fields are missing for most records, which is expected because most contacts are not members. The gaps that matter most for STAV are organisation and location, because without them contacts cannot be attributed to schools or to metropolitan and regional areas.
+
+**Can contacts be segmented?** STAV would like to tailor communication by type of contact (for example primary teacher, secondary teacher or researcher), by school type and by metropolitan or regional location. @tbl-segmentation shows that the CRM cannot yet support this. There is no structured role field. Role information is scattered across a free-text job title (`r pc(position_share)` of records, with `r position_values` different values), a short "your role" question (`r pc(your_role_share)`, with only Student, Teacher and Other) and a leadership-role question (`r pc(leadership_share)`). Two fields whose names suggest primary and secondary teachers in fact record journal subscriptions. School type can be inferred only for the `r cm(school_plan_n)` records on a school group membership plan, and the region field mostly holds the state, with only `r metro_regional_n` records marked as metropolitan or country. Segmentation therefore has to start with how data are collected, which is the basis of recommendation 2 in @sec-strategy.
+
+```{r}
+#| label: tbl-segmentation
+#| tbl-cap: "Completeness of the information needed to segment contacts by role, school type and location."
+#| tbl-colwidths: [27, 47, 26]
+tribble(
+  ~Segment, ~`Where the information currently sits`, ~`Records with usable information`,
+  "Contact role", "Free-text job title or position (no fixed list of roles)", paste0(pc(position_share), " (", position_values, " different values)"),
+  "Contact role", "'Your role' question: Student, Teacher or Other only", pc(your_role_share),
+  "Leadership role", "Leadership question, e.g. Science Coordinator, Head of Program", pc(leadership_share),
+  "School type", "Inferred only from school group membership plans", pc(school_plan_n / n_crm),
+  "Metropolitan or regional", "Region field, which mostly records the state", paste0(pc(metro_regional_n / n_crm), " (", metro_regional_n, " records)")
+) |>
+  kable()
+```
+
+All emails pass a format check (`r pc(email_valid_share, 0)` are syntactically valid). Format, however, is not accuracy: the CRM cannot show whether an address still reaches the person. About `r pc(education_domain_share, 0)` of addresses use an education domain (`r pc(govt_domain_share, 0)` `education.vic.gov.au` and the rest school or university `.edu.au` addresses), which offers weak corroboration of an education affiliation. About `r pc(personal_domain_share, 0)` use personal providers such as Gmail, which offer none. This limitation is discussed in @sec-limitations.
+
+## Can school names be standardised? (RQ2)
+
+The reviewed mapping links `r cm(n_variants)` distinct CRM school names to `r n_approved` approved schools. `r n_multi` of these schools (`r pc(n_multi / n_approved)`) appear under more than one name, and one school appears under as many as `r max_variants` (@fig-school-names). @tbl-school-examples gives examples. A single school such as Caulfield Grammar School appears with and without "School" and with campus suffixes; without a mapping, its contacts and memberships would be split across several apparent organisations.
+
+```{r}
+#| label: fig-school-names
+#| fig-cap: "Number of CRM name variations per approved school, within the reviewed mapping. Almost two-thirds of reviewed schools appear under more than one name."
+#| fig-height: 2.5
+variant_levels <- c("1 CRM name", "2 CRM names", "3 CRM names", "4–5 CRM names", "6+ CRM names")
+name_dist |>
+  mutate(category = factor(category, levels = rev(variant_levels)),
+         multiple = category != "1 CRM name") |>
+  ggplot(aes(organisations, category, fill = multiple)) +
+  geom_col(width = 0.6, show.legend = FALSE) +
+  geom_text(aes(label = organisations), hjust = -0.2, size = 3.3, colour = stav_ink) +
+  scale_fill_manual(values = c(`TRUE` = stav_teal, `FALSE` = stav_grey)) +
+  scale_x_continuous(expand = expansion(mult = c(0, 0.1))) +
+  labs(x = "Approved schools", y = NULL) +
+  theme_stav()
+```
+
+```{r}
+#| label: tbl-school-examples
+#| tbl-cap: "Examples of how one approved school appears under several CRM names."
+#| tbl-colwidths: [22, 8, 45, 25]
+map_examples |>
+  rename(School = `Approved school`, Names = `CRM name variations`,
+         `Example CRM names` = `Example CRM names`, Campuses = `Recorded campuses`) |>
+  kable()
+```
+
+**How reliable is the matching rule?** Because my supervisor checked every pair the rule flagged, it is possible to measure how often the rule was right. This share is called *precision*: of all the pairs the rule suggested, how many really were the same school. Each pair was flagged for one of two reasons, either because one name contains the other or because the two names are spelled almost the same. @tbl-matching reports, for each reason, how many pairs were flagged, how many the supervisor confirmed and the resulting precision. The spelling-based pairs are then split into three groups by their distance $\tilde d$: the larger the distance, the less alike the two names are.
+
+Overall, `r pc(precision_all, 0)` of the `r n_pairs` flagged pairs referred to the same school, so roughly one in five suggestions was wrong. The two reasons behave very differently. Pairs flagged because one name contains the other were almost always correct, typically a short form such as "Haileybury" inside "Haileybury College". Pairs flagged only for similar spelling were correct about half the time, and their precision falls steadily as the names become less alike. Lowering the threshold would therefore remove many wrong suggestions, but it would also miss genuine typo variants, some of which score just below 0.20.
+
+```{r}
+#| label: tbl-matching
+#| tbl-cap: "How often the matching rule was right, judged by the supervisor's review. Precision is the share of flagged pairs confirmed as the same school."
+#| tbl-colwidths: [52, 16, 16, 16]
+band_labels <- c("0.00–0.10" = "– very similar (distance 0.00–0.10)",
+                 "0.10–0.15" = "– fairly similar (distance 0.10–0.15)",
+                 "0.15–0.20" = "– least similar (distance 0.15–0.20)")
+bind_rows(
+  rule_table |>
+    mutate(rule = if_else(str_detect(rule, "contains"), "One name contains the other",
+                          "Spelled almost the same (all)")) |>
+    transmute(`Why the pair was flagged` = rule, `Pairs flagged` = pairs,
+              `Confirmed` = confirmed, Precision = pc(precision, 0)),
+  band_table |>
+    transmute(`Why the pair was flagged` = band_labels[as.character(band)],
+              `Pairs flagged` = pairs, `Confirmed` = confirmed,
+              Precision = pc(precision, 0))
+) |>
+  kable(align = c("l", "r", "r", "r"))
+```
+
+This diagnostic answers RQ2. Automated matching is effective at *finding* candidates, especially through containment, but similar spelling alone is not sufficient evidence of identity: "Braemar College" and "Brauer College" are a distance of 0.20 apart but are different schools. Human review was therefore essential, and the review labels now provide a validation set that could be used to tune the threshold in future. Nine CRM names map to more than one approved school and still need a decision before automatic linking.
+
+**From cleaning to prevention.** Matching cleans names after they have been entered, which treats the symptom rather than the cause. School and organisation names reach the CRM through several routes: manual entry by STAV staff, new membership forms, newsletter sign-ups, event registrations and online shop purchases (@fig-data-entry). Each route has allowed the name to be typed as free text, so the CRM relies on many different people to enter the same school in the same way. The lasting solution is a lookup table: a single approved list of schools from which the name is selected rather than typed, applied at every point where data enter the CRM. Based on this analysis and recommendation, STAV has now applied a school-name lookup table at the points where contact profiles are filled in, including staff data entry, membership forms, newsletter sign-ups, event registrations and online shop purchases. New records should therefore arrive with consistent school names, so the mapping does not have to be repeated. The same approach should next be extended to the company or organisation field.
+
+```{r}
+#| label: fig-data-entry
+#| fig-cap: "How school names enter STAV's CRM. STAV has now applied a school-name lookup table at each of these profile entry points, so names are selected from an approved list rather than typed."
+#| fig-height: 2.9
+entry_points <- tibble(
+  label = c("Manual entry by STAV staff", "New membership form", "Newsletter sign-up",
+            "Event registration", "Online shop purchase"),
+  y = 5:1
+)
+diagram <- ggplot() +
+  geom_segment(data = entry_points, aes(x = 3.05, xend = 4.5, y = y, yend = 3),
+               colour = "#8b9da7", linewidth = 0.4,
+               arrow = arrow(length = unit(0.12, "cm"), type = "closed")) +
+  geom_label(data = entry_points, aes(x = 1.9, y = y, label = label),
+             fill = "#f2f6f8", colour = stav_ink, label.size = 0, size = 3.2,
+             label.padding = unit(0.3, "lines"), hjust = 0.5) +
+  annotate("label", x = 5.45, y = 3,
+           label = "Lookup table
+approved school and
+organisation names
+(select, not type)",
+           fill = stav_teal, colour = "white", label.size = 0, size = 3.2,
+           fontface = "bold", label.padding = unit(0.5, "lines"), lineheight = 0.95) +
+  annotate("segment", x = 6.75, xend = 7.55, y = 3, yend = 3, colour = stav_navy,
+           linewidth = 0.8, arrow = arrow(length = unit(0.18, "cm"), type = "closed")) +
+  annotate("label", x = 8.45, y = 3, label = "CRM
+database", fill = stav_navy,
+           colour = "white", label.size = 0, size = 3.6, fontface = "bold",
+           label.padding = unit(0.7, "lines"), lineheight = 0.95) +
+  annotate("text", x = 1.9, y = 5.75, label = "Where data enter",
+           colour = "#596575", size = 3, fontface = "bold") +
+  coord_cartesian(xlim = c(0.5, 9.4), ylim = c(0.5, 6), clip = "off") +
+  theme_void()
+ggsave("reports/final/figures/data_entry_lookup.png", diagram,
+       width = 7.5, height = 3.1, dpi = 300, bg = "white")
+diagram
+```
+
+## Are school contacts clearly linked?
+
+`r cm(school_plan_n)` records hold a school group membership plan. Of these, `r no_org` (`r pc(no_org / school_plan_n)`) have no organisation recorded, so they cannot be attributed to a school. Group roles are also unclear in places (@tbl-school-links): some organisation groups have members but no identifiable administrator, while others have several. These are review indicators, not confirmed errors; several administrators may be legitimate.
+
+The recorded roles themselves are uneven. Among school-plan records, `r role_of("Group Admin only")` are tagged only as Group Admin, `r role_of("Group Member only")` only as Group Member, `r role_of("Both")` as both, and `r role_of("Neither")` carry neither tag. Because roles live in a free-text tag field, they are easy to omit or to record inconsistently. For STAV this matters practically: the Group Admin is usually the person who manages a school's membership and renewal, so an organisation without an identifiable administrator is one where renewal communication may not reach the right person.
+
+```{r}
+#| label: tbl-school-links
+#| tbl-cap: "School-contact relationship indicators among school group membership records."
+school_links |>
+  rename(Indicator = finding, Count = count) |>
+  kable(align = c("l", "r"))
+```
+
+## Is membership information reliable?
+
+STAV currently decides whether a contact is a member from two CRM fields: *membership status* (for example Active, On-hold or Expired) and *membership plan* (for example Secondary Teacher or Secondary School – Group Membership). In principle, a contact with an Active status on a current plan is a member. `r cm(n_status)` records have a status, of which `r n_active` are Active (@fig-membership), and `r cm(n_plan)` records have a plan.
+
+In practice, these two fields cannot yet produce a reliable member list, for four reasons (@tbl-membership). First, the fields are not filled in together: `r plan_no_status` records have a plan but no status, and `r status_no_plan` have a status but no plan, so the two fields can give different answers about the same contact. Second, status is not kept in step with subscription dates: `r active_past_end` records are marked Active even though their subscription end date had already passed at the time of the snapshot. Third, there is no agreed rule for which statuses count as current; for example, it is unclear whether the `r n_onhold` On-hold records are members. Fourth, plan names are recorded with inconsistent dashes and spacing, so they must be standardised before plans can be counted reliably. For any single record, the export cannot tell whether the status, the date or the entitlement is wrong. A renewal may have been processed without updating the end date, or the status may never have been switched to Expired. As a result, STAV cannot currently derive a verified list of current members from the CRM.
+
+```{r}
+#| label: fig-membership
+#| fig-cap: "Recorded membership status among records with a status. Recorded status is not the same as verified current membership."
+#| fig-height: 2.2
+status_levels <- c("Active", "On-hold", "Expired", "Other")
+status_chart |>
+  mutate(status = factor(status, levels = rev(status_levels)),
+         highlight = status == "Active") |>
+  ggplot(aes(records, status, fill = highlight)) +
+  geom_col(width = 0.6, show.legend = FALSE) +
+  geom_text(aes(label = paste0(records, " (", pc(share, 0), ")")),
+            hjust = -0.1, size = 3.3, colour = stav_ink) +
+  scale_fill_manual(values = c(`TRUE` = stav_navy, `FALSE` = stav_grey)) +
+  scale_x_continuous(expand = expansion(mult = c(0, 0.2))) +
+  labs(x = "CRM records", y = NULL) +
+  theme_stav()
+```
+
+```{r}
+#| label: tbl-membership
+#| tbl-cap: "Membership review indicators. Indicators may overlap and should not be added."
+member_review |>
+  kable(align = c("l", "r"))
+```
+
+## Can engagement be measured from the CRM?
+
+No. The export contains no consistent dated history of communications, event attendance or program participation, so engaged or dormant contacts cannot be identified reliably. A recorded Active status describes membership administration, not engagement. This is the clearest example of the gap between knowing *who* contacts are and knowing *what they do*.
+
+# Results: the website (RQ3) {#sec-web}
+
+## How do people reach the website?
+
+Website traffic varied considerably across the year (@fig-monthly). It was lowest in `r format(low_month$date, "%B %Y")` (`r cm(low_month$sessions)` sessions) and highest in `r format(peak_month$date, "%B %Y")` (`r cm(peak_month$sessions)`), with generally higher activity from February to June 2026. This rhythm is consistent with the school year and with STAV's program calendar, but GA4 data alone cannot confirm the cause of any individual peak.
+
+```{r}
+#| label: fig-monthly
+#| fig-cap: "Monthly website sessions, July 2025 to June 2026."
+#| fig-height: 2.6
+ggplot(monthly_total, aes(date, sessions)) +
+  geom_line(colour = stav_navy, linewidth = 0.9) +
+  geom_point(colour = stav_navy, size = 1.8) +
+  geom_point(data = peak_month, colour = stav_teal, size = 3) +
+  geom_text(data = peak_month, aes(label = paste("Peak:", cm(sessions))),
+            vjust = -1, size = 3.2, colour = stav_teal) +
+  scale_x_date(date_breaks = "2 months", date_labels = "%b %Y") +
+  scale_y_continuous(labels = scales::comma, expand = expansion(mult = c(0.05, 0.2))) +
+  labs(x = NULL, y = "Sessions") +
+  theme_stav() +
+  theme(panel.grid.major.y = element_line(colour = "#e5eaee"),
+        panel.grid.major.x = element_blank())
+```
+
+Two channels dominate acquisition (@fig-channels). Direct traffic generated `r pc(ch("Direct", "share"))` of sessions and Organic Search `r pc(ch("Organic Search", "share"))`; together they account for about `r pc(ch("Direct", "share") + ch("Organic Search", "share"), 0)`. Referral contributed only `r pc(ch("Referral", "share"))`. Search sessions were also about twice as engaged as Direct sessions (`r pc(ch("Organic Search", "engagement_rate"))` versus `r pc(ch("Direct", "engagement_rate"))`). Most search traffic comes from Google, so the pages that rank in search are an important front door for new visitors. Direct traffic should be read with care, because it includes bookmarks and visits whose source GA4 could not identify.
+
+At the level of individual sources, Google provided `r cm(sm("google / organic"))` sessions and Bing `r cm(sm("bing / organic"))`, so Google alone accounts for `r pc(sm("google / organic") / search_total, 0)` of organic search sessions. STAV's visibility in Google results is therefore a single point of dependence. A page that drops out of search results, or a URL that changes without a redirect, can remove a large share of new visitors without any visible error on the website.
+
+```{r}
+#| label: fig-channels
+#| fig-cap: "Sessions and engagement rate by acquisition channel (main channels). Organic Search is smaller than Direct but about twice as engaged."
+#| fig-height: 2.3
+channels |>
+  slice_max(sessions, n = 4) |>
+  mutate(channel = fct_reorder(channel, sessions),
+         label = paste0(cm(sessions), " (", pc(share), ") · engaged ", pc(engagement_rate, 0))) |>
+  ggplot(aes(sessions, channel, fill = channel == "Organic Search")) +
+  geom_col(width = 0.6, show.legend = FALSE) +
+  geom_text(aes(label = label), hjust = -0.05, size = 3.1, colour = stav_ink) +
+  scale_fill_manual(values = c(`TRUE` = stav_teal, `FALSE` = stav_grey)) +
+  scale_x_continuous(labels = scales::comma, expand = expansion(mult = c(0, 0.65))) +
+  labs(x = "Sessions", y = NULL) +
+  theme_stav()
+```
+
+## Which content matters most?
+
+Grouping pages into business categories makes the main pattern clear (@fig-content). Science Talent Search is both the largest entry point, accounting for `r pc(lc("Science Talent Search"))` of landing-page sessions, and the most-viewed content, accounting for `r pc(pv("Science Talent Search"))` of all page views (`r cm(pv("Science Talent Search", "views"))` views). The two measures tell different stories for other categories. Account pages make up `r pc(pv("Account"))` of views but only `r pc(lc("Account"))` of entries, so people reach them while using the site rather than arriving there. The homepage, by contrast, is a more common entry point than destination.
+
+```{r}
+#| label: fig-content
+#| fig-cap: "Share of landing-page sessions and of page views for the main content categories. Each measure has its own denominator."
+#| fig-height: 3
+content_levels <- c("Science Talent Search", "Events & Conferences", "Homepage", "Account")
+bind_rows(
+  landing_cat |> transmute(category, measure = "Entry (landing-page sessions)", share),
+  page_cat |> transmute(category, measure = "All page views", share)
+) |>
+  filter(category %in% content_levels) |>
+  mutate(category = factor(category, levels = rev(content_levels)),
+         measure = factor(measure, levels = c("Entry (landing-page sessions)", "All page views"))) |>
+  ggplot(aes(share, category, fill = measure)) +
+  geom_col(position = position_dodge(width = 0.75), width = 0.7) +
+  geom_text(aes(label = pc(share)), position = position_dodge(width = 0.75),
+            hjust = -0.15, size = 3, colour = stav_ink) +
+  scale_fill_manual(values = c(`Entry (landing-page sessions)` = stav_navy,
+                               `All page views` = "#8abcc2")) +
+  scale_x_continuous(labels = scales::percent, expand = expansion(mult = c(0, 0.15))) +
+  labs(x = "Share of the corresponding total", y = NULL) +
+  theme_stav()
+```
+
+Attention is also concentrated: the 100 most-viewed pages account for `r pc(top100_share)` of the `r cm(total_views)` page views in the year. STS demand is strongly seasonal. Monthly views ranged from `r cm(sts_low$views)` in `r format(sts_low$date, "%B %Y")` to `r cm(sts_peak$views)` in `r format(sts_peak$date, "%B %Y")`, so STS content needs to be accurate and easy to find well before its busy months. Other areas peak at different times: Events & Conferences reached `r cm(peak_of("Events & Conferences", "views"))` views in `r format(peak_of("Events & Conferences", "date"), "%B %Y")`, and Resources & Publications `r cm(peak_of("Resources & Publications", "views"))` in `r format(peak_of("Resources & Publications", "date"), "%B %Y")`. This staggered calendar is useful for planning. Content reviews can be scheduled for each area a month or two before its peak, rather than reviewing the whole website at once. A supplementary GA4 path exploration for August to September 2026 (@fig-sts-path) shows that visitors who move on from the main STS page mostly continue to other STS content, such as the Awards Showcase and STS Resources.
+
+```{r}
+#| label: fig-sts-path
+#| fig-cap: "GA4 path exploration from the Science Talent Search page, 1 August to 30 September 2026 (supplementary period)."
+#| out-width: "85%"
+knitr::include_graphics("figures/ga4_sts_path_exploration_aug_sep_2026.png", error = FALSE)
+```
+
+## Who uses the website?
+
+Device-level Active Users were mostly desktop (`r pc(dev("desktop", "active_users") / device_total)`), with mobile at `r pc(dev("mobile", "active_users") / device_total)` (@fig-device). Mobile sessions were nevertheless more often engaged (`r pc(dev("mobile", "engagement_rate"))` versus `r pc(dev("desktop", "engagement_rate"))` for desktop), so mobile remains important for key tasks such as checking an event or downloading a resource.
+
+```{r}
+#| label: fig-device
+#| fig-cap: "Active Users and engagement rate by device. Users can appear under more than one device."
+#| fig-height: 1.6
+device |>
+  filter(active_users >= 100) |>
+  mutate(device_category = str_to_title(device_category),
+         device_category = fct_reorder(device_category, active_users),
+         label = paste0(cm(active_users), " (", pc(active_users / device_total), ") · engaged ",
+                        pc(engagement_rate, 0))) |>
+  ggplot(aes(active_users, device_category, fill = device_category == "Mobile")) +
+  geom_col(width = 0.6, show.legend = FALSE) +
+  geom_text(aes(label = label), hjust = -0.05, size = 3.1, colour = stav_ink) +
+  scale_fill_manual(values = c(`TRUE` = stav_teal, `FALSE` = stav_grey)) +
+  scale_x_continuous(labels = scales::comma, expand = expansion(mult = c(0, 0.6))) +
+  labs(x = "Device-level Active Users", y = NULL) +
+  theme_stav()
+```
+
+Australia accounted for `r pc(aus_user_share)` of country-level Active Users but `r pc(aus_event_share)` of recorded events (@fig-country). Several overseas locations recorded many users with very low engagement, which suggests automated or incidental traffic rather than a genuine international audience. User counts by country should therefore be read together with engagement before they are used to describe STAV's audience.
+
+```{r}
+#| label: fig-country
+#| fig-cap: "Top five countries by Active Users, with engagement rate. High user counts with very low engagement suggest incidental or automated traffic."
+#| fig-height: 2.2
+country |>
+  slice_max(active_users, n = 5, with_ties = FALSE) |>
+  mutate(country = fct_reorder(country, active_users),
+         label = paste0(cm(active_users), " (", pc(active_users / country_total), ") · engaged ",
+                        pc(engagement_rate, 0))) |>
+  ggplot(aes(active_users, country, fill = country == "Australia")) +
+  geom_col(width = 0.6, show.legend = FALSE) +
+  geom_text(aes(label = label), hjust = -0.05, size = 3.1, colour = stav_ink) +
+  scale_fill_manual(values = c(`TRUE` = stav_navy, `FALSE` = stav_grey)) +
+  scale_x_continuous(labels = scales::comma, expand = expansion(mult = c(0, 0.6))) +
+  labs(x = "Country-level Active Users", y = NULL) +
+  theme_stav()
+```
+
+## What can GA4 currently measure?
+
+GA4 records substantial interaction beyond page views (@fig-events): `r cm(ev("form_start"))` form starts, `r cm(ev("form_submit"))` form submissions and `r cm(ev("file_download"))` file downloads during the year. These counts reveal less than they appear to.
+
+```{r}
+#| label: fig-events
+#| fig-cap: "Tracked interaction events, July 2025 to June 2026. Highlighted events are those most relevant to STAV outcomes, but they are recorded without form or file names."
+#| fig-height: 2.3
+outcome_events <- c("form_start", "form_submit", "file_download")
+events |>
+  filter(event_name %in% c("scroll", "click", outcome_events, "video_start",
+                           "video_progress", "video_complete", "view_search_results")) |>
+  mutate(event_name = fct_reorder(event_name, event_count),
+         outcome = event_name %in% outcome_events) |>
+  ggplot(aes(event_count, event_name, fill = outcome)) +
+  geom_col(width = 0.6, show.legend = FALSE) +
+  geom_text(aes(label = cm(event_count)), hjust = -0.15, size = 3.1, colour = stav_ink) +
+  scale_fill_manual(values = c(`TRUE` = stav_teal, `FALSE` = stav_grey)) +
+  scale_x_continuous(labels = scales::comma, expand = expansion(mult = c(0, 0.15))) +
+  labs(x = "Event count", y = NULL) +
+  theme_stav()
+```
+
+The events carry no form or file names, so STAV cannot tell which registration form or which resource was used. Starts and submissions are independent totals, so dividing one by the other does not give a completion rate. None of these interactions were marked as Key Events, so GA4 cannot distinguish routine activity from outcomes that matter to STAV, such as an STS registration or a membership enquiry. In addition, `r pc(landing_cat$share[landing_cat$category == "Not set"])` of landing-page sessions had no landing page recorded ("(not set)"), and the GA4 property retains detailed exploration data only for a limited period, so historical user journeys could not be reconstructed.
+
+The answer to RQ3 is therefore two-sided. GA4 already shows clearly *how* people arrive and *what* they view: search and STS content matter most. It cannot yet show whether the website achieves STAV's goals, because the actions that would demonstrate this are either untracked or unlabelled.
+
+# The STAV Insights Dashboard (RQ4) {#sec-dashboard}
+
+## Purpose and design
+
+The analysis above is a one-off snapshot, whereas STAV needs to revisit these questions as new exports arrive. The dashboard was designed so that a staff member without R experience can answer focused questions. Each tab is built around one question (@tbl-dashboard): summary metrics at the top, one main chart, and supporting tables below.
+
+```{r}
+#| label: tbl-dashboard
+#| tbl-cap: "Dashboard tabs and the question each one answers."
+#| tbl-colwidths: [20, 38, 42]
+tribble(
+  ~Tab, ~`Question it answers`, ~`Main elements`,
+  "Overview", "What is the overall scale of the CRM and website?", "Headline metrics; guidance on where to focus",
+  "CRM Data Quality", "Which fields are incomplete and which records may be duplicates?", "Field coverage chart; searchable duplicate review table; CSV export",
+  "CRM Membership & Schools", "Which membership and school records need checking?", "Status chart; plan, review-indicator and role tables",
+  "GA4 Traffic", "How does traffic from each channel change by month?", "Month range and channel filters; month-on-month comparison; trend chart; CSV export",
+  "GA4 Content", "Which pages within a content area are viewed most?", "Category filter; month-on-month comparison; top-15 pages chart; CSV export"
+) |>
+  kable()
+```
+
+## How it works
+
+The app reads a single configuration file that lists the input files and the reporting period. Before anything is displayed, a validation step checks that the GA4 period consists of complete calendar months, that each export's embedded dates match the configuration, and that all required columns are present. It also checks that no channel-month or page-month row is duplicated, that counts are finite and non-negative, and that the CRM summaries match the configured snapshot date. If any check fails, the app stops with an explanatory message rather than showing misleading numbers. The same checks can be run without opening the app.
+
+Interactivity uses Shiny's reactive model. Filters for month range, channel and content category feed `reactive()` expressions that filter and summarise the data, and every chart, table and metric that depends on them updates automatically. Two calculations were designed with care. First, the engagement rate for a selection is pooled, as the total engaged sessions divided by the total sessions, rather than an average of monthly percentages, so large months carry appropriate weight. Second, the month-on-month comparison reports percentage change for sessions and views but percentage-point change for engagement. A month with no exported rows is shown as unavailable rather than as zero. CRM tabs display prepared summary tables; contact-level data never enter the app. A fictional demonstration mode, with clearly labelled simulated data, allows the app to be shown without exposing STAV data.
+
+Several smaller functions support everyday use. Each GA4 tab has a reset button that returns all filters to the full year, so a user who has explored a narrow selection can start again with one click. Each table is searchable and sortable, and the filtered data behind the GA4 views, as well as the CRM coverage summary, can be downloaded as CSV files for further work in a spreadsheet. Refreshing the dashboard is designed as a short, documented routine. A staff member exports the same two monthly GA4 reports, updates the file paths and dates in the configuration file, and runs the data check. If the check passes, the app shows the new period; if it fails, the message names the problem, such as a wrong date range or a missing column.
+
+@fig-dashboard-traffic and @fig-dashboard-content show two tabs with real prepared data.
+
+```{r}
+#| label: fig-dashboard-traffic
+#| fig-cap: "Dashboard, GA4 Traffic tab: filtered to Organic Search, with the June versus May comparison above the monthly trend."
+#| out-width: "88%"
+knitr::include_graphics("figures/shiny_traffic.png", error = FALSE)
+```
+
+```{r}
+#| label: fig-dashboard-content
+#| fig-cap: "Dashboard, GA4 Content tab: filtered to Science Talent Search, showing the monthly comparison and the 15 most-viewed pages."
+#| out-width: "88%"
+knitr::include_graphics("figures/shiny_content.png", error = FALSE)
+```
+
+The dashboard's current limitations are that it reads prepared snapshots rather than live systems, and that CRM summaries must be regenerated by the analysis reports before it can show a new CRM export.
+
+# Discussion
+
+## Connecting the findings
+
+Taken together, the results describe an organisation with a clearly defined community and clear interests, but with data that cannot yet connect the two. The CRM shows that STAV's contacts are largely teachers attached to schools, yet a third of records lack an organisation and school names are inconsistent, so even "how many contacts does this school have?" needs a reviewed mapping to answer. The website shows that this community comes mainly through search and is drawn above all to STS, yet the actions that would show whether a visit led to an outcome are not tracked. Membership status in the CRM and interactions on the website are both recorded, but neither is defined well enough to measure engagement. The common lesson is that data quality and measurement design, more than additional data, are what limit STAV's decisions today.
+
+The findings also translate into concrete work for different parts of the organisation. For staff who manage membership, the review lists identify a manageable number of records to check first, starting with the `r active_past_end` Active records past their end date and the school-plan records without an organisation. For communications staff, the missing organisation and location fields explain why it is currently difficult to target messages to particular schools or regions, and they show which details to request when contacts next update their information. For whoever maintains the website, the analysis identifies the pages that matter most, the months in which they matter, and the tracking changes needed to measure outcomes.
+
+Underlying all of these is a question of ownership. Data quality problems tend to persist when no one is responsible for a field's definition and upkeep. Naming an owner for core fields such as organisation, role and membership status, and recording agreed definitions in a short data dictionary, would make the improvements below easier to sustain once the project ends.
+
+## Strategic implications and recommendations {#sec-strategy}
+
+The CRM and website analyses provide an important evidence base for STAV's digital engagement strategy. They highlight an opportunity to move beyond managing contacts and publishing content towards a more connected, targeted and measurable approach to engaging science educators.
+
+STAV has a substantial contact database and established communication channels. However, inconsistencies in contact, school and membership information, together with limited visibility of individual engagement over time, constrain STAV's ability to understand its community, personalise communications and measure the impact of its activities.
+
+The website analysis also shows that visibility, audience interaction and further action are distinct outcomes. Sessions and page views measure visibility; engaged sessions, scrolling and clicks measure interaction; and form submissions and downloads are the first signs of further action (@sec-web). Without consistent event tracking, and without connections between website and participation data, STAV cannot reliably determine which activities contribute to registrations, resource use or deeper engagement.
+
+The recommended strategic priorities are to:
+
+1. **Strengthen data quality and governance** by establishing consistent CRM standards, clarifying membership definitions and improving contact and school information. STAV has already applied a school-name lookup table at its profile entry points (@fig-data-entry); the next step is to apply the same approach to the company or organisation field and to work through the prioritised review lists of duplicate candidates, school-plan records without an organisation and Active records past their end date. STAV should also develop clear rules for the membership sign-up and renewal process, defining how membership status, plan and subscription dates determine current membership, so that these fields are maintained consistently.
+2. **Develop a clearer understanding of STAV's audiences** through practical segmentation that supports more relevant communication and targeted outreach. Segments should cover the type of contact (primary teacher, secondary teacher, researcher, university lecturer, scientist, company or sponsor), the type of school (primary, secondary or P-12) and location (metropolitan or regional). Because the CRM has no structured role field and records almost no metropolitan or regional information (@tbl-segmentation), STAV should add a *Role* field, with a fixed list of options, to the CRM and to its data collection forms, so that role-based segmentation can occur. School type and location should be captured in the same way.
+3. **Establish meaningful performance measures** that distinguish awareness from participation and enable STAV to assess engagement, identify opportunities and make evidence-informed decisions. Each system needs its own measures. On the website, STAV should configure Key Events in GA4 for the actions that matter, such as STS registration and membership enquiries, and add form and file names to existing events. In the CRM, participation in programs and events should be recorded with dates, so that engagement can be measured rather than inferred from membership status.
+
+Two website-specific actions also follow directly from RQ3. STAV should prioritise maintenance of STS content ahead of its seasonal peaks, and it should protect high-traffic search entry pages, for example by redirecting old URLs when pages are moved.
+
+Implementation should be phased (@tbl-roadmap), beginning with data quality, measurement foundations and selected engagement pilots before introducing more advanced automation or engagement scoring.
+
+```{r}
+#| label: tbl-roadmap
+#| tbl-cap: "Suggested phased implementation."
+#| tbl-colwidths: [20, 24, 56]
+tribble(
+  ~Phase, ~Focus, ~`Example actions`,
+  "1. Foundations", "Data quality and governance", "Extend the lookup-table approach to the organisation field; review duplicate, school-link and membership lists; set membership sign-up and renewal rules",
+  "2. Measurement", "Segmentation and tracking", "Add Role, school type and location fields to the CRM and forms; define GA4 Key Events; pilot dated participation tracking for one program such as STS",
+  "3. Insight", "Engagement and automation", "Refresh the dashboard each quarter; introduce automation or engagement scoring once the data support it"
+) |>
+  kable()
+```
+
+The intended outcome is not simply a cleaner CRM or stronger digital metrics. It is a more connected professional community, a more relevant experience for science educators and a stronger evidence base for STAV's decisions, programs and future growth.
+
+## Limitations and future work {#sec-limitations}
+
+Several limitations qualify these findings.
+
+- **Accuracy cannot be verified from the data.** Completeness measures whether a value is present, not whether it is correct or current. All emails are well formed, but the CRM cannot show whether they still reach the person, or whether a recorded school is the contact's current school. Accuracy could be checked against email-platform bounce data, by comparing email domains with recorded schools, or through periodic self-update requests to contacts.
+- **Snapshots.** Both analyses describe fixed periods: one CRM export and one GA4 year. The live systems will have changed since.
+- **Matching scope and threshold.** The precision estimates describe the reviewed candidate population. The 0.20 threshold was chosen by judgement rather than tuned; the supervisor's labels now make tuning possible. Names that were never flagged as candidates were not reviewed, so recall is unknown.
+- **No linkage and no causal claims.** CRM contacts and website visitors cannot be matched, so the project cannot say whether website activity leads to membership or participation. Seasonal patterns are described, not explained.
+- **GA4 constraints.** Active Users are not additive across rows; some sessions have no recorded landing page; and data-retention limits prevented historical journey analysis.
+
+Future work could tune the matching threshold against the review labels, link GA4 Key Events to CRM records through consented identifiers, and build engagement indicators once dated participation data exist.
+
+## Project reflection
+
+The project involved substantial data engineering as well as analysis. The hardest technical problem was importing the CRM correctly, which required diagnosing why two standard parsers disagreed and writing a validated alternative. Other challenges were interpreting GA4 metrics that are easy to misread (non-additive users and independent event counts), reconstructing dates from month-only exports, and keeping personal information out of every shared output. I learned to treat data quality findings as review lists rather than corrections, to measure the reliability of a matching rule rather than assume it, and to design a dashboard around the questions its users ask. Working with my supervisor on the school-name review showed me that domain knowledge is an essential part of a data pipeline.
+
+# Conclusion
+
+STAV's existing data can already support better decisions, provided their limits are understood. The CRM is a useful foundation, but incomplete organisation and location fields, possible duplicates, inconsistent school names and unreliable membership status prevent dependable school-level, membership or engagement reporting today. A reviewed mapping now links `r cm(n_variants)` school names to `r n_approved` schools, and the evaluation of the matching rule shows that human review was necessary. On the website, search and Science Talent Search content drive much of the activity, but the actions that would show outcomes are not yet tracked. The dashboard makes these results accessible to staff. By strengthening data governance, recording roles, schools and locations consistently, and defining what membership and engagement mean, STAV can move from maintaining records to understanding and serving its community.
+
+# References {.unnumbered}
+
+::: {#refs}
+:::
+
+# Appendix {.appendix}
+
+## Page classification rules {#sec-rules}
+
+Rules are applied in order and the first match wins. They match page paths (`str_detect()`); the full rules are in `apps/stav-dashboard/R/content.R`.
+
+```{r}
+#| label: tbl-rules
+#| tbl-cap: "Content categories and the URL patterns that define them."
+tribble(
+  ~Category, ~`Example patterns`,
+  "Homepage", "`/`",
+  "Science Talent Search", "`science-talent-search`, `/sts-`",
+  "Events & Conferences", "`/event/`, `/events`, `/workshops`, `conference`, `stavcon`",
+  "Resources & Publications", "`/publications`, `/resources`, `labtalk`, `teaching-science-journals`",
+  "Science Programs & Initiatives", "`science-in-construction`, `national-science-week`",
+  "Shop", "`/shop`, `/product`, `/cart`, `/checkout`",
+  "Membership", "`member`, `membership`",
+  "Account", "`/my-account`, `/login`",
+  "Organisation", "`/about-us`, `/our-team`, `/contact-us`, `/stav-council`",
+  "Forums / Community", "`/forums`, `/discussion-forums`",
+  "Files", "`/wp-content/uploads/`",
+  "Other", "Any page not matched above"
+) |>
+  kable()
+```
+
+## Reproducing this report
+
+The report renders from the repository root with authorised data present locally. The order is: (1) `reports/CRM/01_crm_data_preparation.qmd`, which validates and prepares the CRM export; (2) `reports/CRM/02_crm_analysis_report.qmd`, which writes the CRM summaries used here; and (3) this report, rendered with `quarto render reports/final/final_report.qmd`. The GA4 exports are read directly from `data/raw/GA4/`. Confidential data are excluded from Git, so a public clone can inspect the code but cannot reproduce the real-data results; the dashboard's fictional demonstration mode runs without them.
+
+## Use of generative AI
+
+I used Claude (Anthropic) to help integrate my earlier CRM and GA4 reports into this document, to suggest wording and structure, and to check figures and code. All analysis decisions, data processing and interpretations are my own, and I reviewed and edited all text.
