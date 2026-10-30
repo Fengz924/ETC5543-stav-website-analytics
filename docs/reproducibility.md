@@ -1,8 +1,9 @@
 # Reproducing the current project
 
-This guide covers the CRM, GA4 website analysis, Shiny dashboard and presentation.
-Run commands from the repository root unless stated otherwise. The component
-reports are not the individual final report; that report is being rewritten.
+This guide covers the CRM, GA4 website analysis, Shiny dashboard, presentation
+and the final integrated report. Run commands from the repository root unless
+stated otherwise. The CRM and GA4 reports are supporting component reports; the
+final report in `reports/final/` is the main deliverable.
 
 ## Environment
 
@@ -15,7 +16,7 @@ Install the R packages used by the current CRM, GA4 and dashboard sources:
 ```r
 install.packages(c(
   "tidyverse", "janitor", "lubridate", "here", "jsonlite", "knitr",
-  "shiny", "bslib", "DT", "scales"
+  "shiny", "bslib", "DT", "scales", "naniar"
 ))
 ```
 
@@ -155,6 +156,21 @@ quarto render stav_presentation.qmd
 Its local output is `presentation/build/stav_presentation.html`. The source
 disables code execution and uses bundled charts, so rendering does not run the
 analysis or launch the dashboard. See [presentation instructions](../presentation/README.md).
+
+## 5. Final report
+
+Render after the CRM reports (step 1), because the final report reads the
+aggregate summaries written by Report 02, selected fields of the validated clean
+CRM file, the reviewed school-name candidate file and the GA4 exports:
+
+```sh
+quarto render reports/final/final_report.qmd
+```
+
+The output is `reports/final/final_report.pdf`, produced with Typst (bundled with
+Quarto; no LaTeX installation is required). Page classification reuses
+`apps/stav-dashboard/R/content.R`, so the report and dashboard apply identical
+rules. The report prints only aggregate results and organisation names.
 
 ## Outputs and verification boundaries
 
