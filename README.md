@@ -10,6 +10,7 @@ The project covers two data sources:
 - **Google Analytics 4 (GA4):** website traffic acquisition, content use, audience and device patterns, recorded interactions and tracking limitations.
 
 The Shiny dashboard and presentation communicate findings from these two workstreams.
+The individual final report is being rewritten and is not currently included.
 
 ## Analysis Periods
 
@@ -54,11 +55,17 @@ The CRM snapshot and GA4 reporting period describe different units and timeframe
 
 Use R and Quarto; RStudio is optional. Install the R packages required by each workflow. There is no dependency lockfile, so package versions are not automatically reproduced on another computer.
 
+Start with [reproduction instructions](docs/reproducibility.md) for dependencies,
+private-input requirements, execution order and the fictional dashboard demo.
+See [data sources](docs/data_sources.md) for the current input contracts.
+
 Run report commands from the repository root with authorised input data present.
 
 ### CRM
 
-Prepare and validate the data before running the analysis report:
+Prepare and validate the authorised snapshot before running the analysis report.
+Report 02 also requires the reviewed organisation mapping; see the
+[CRM workflow](docs/CRM/README.md) for that prerequisite.
 
 ```sh
 quarto render reports/CRM/01_crm_data_preparation.qmd --to html
@@ -66,6 +73,9 @@ quarto render reports/CRM/02_crm_analysis_report.qmd --to html
 ```
 
 See [CRM documentation](docs/CRM/README.md) for the source contract, required inputs and validation rules. A new CRM export may require changes to the source contract and snapshot-specific checks before analysis.
+Report 01 regenerates private prepared data and validation outputs; it is not a
+read-only check. Report 02 writes summaries and figures without editing the
+operational CRM.
 
 ### GA4
 
@@ -74,6 +84,9 @@ quarto render reports/GA4/stav_website_report.qmd
 ```
 
 The root `_quarto.yml` renders only this GA4 report by default, uses the repository root for execution and writes output under `outputs/build/`.
+Request CRM reports explicitly. The presentation has a separate configuration
+and writes to `presentation/build/`. Check the output path reported by Quarto;
+an existing HTML file beside a QMD may be an earlier build.
 
 The separate script can also be run:
 
@@ -104,4 +117,11 @@ Operational CRM records and GA4 exports are excluded from Git using `.gitignore`
 
 A public clone cannot reproduce real-data findings without authorised inputs. Fictional dashboard fixtures support a separate demonstration; they do not validate the production CRM preparation workflow or reproduce STAV's actual findings.
 
-See [data sources](docs/data_sources.md), [CRM documentation](docs/CRM/README.md) and [reproducibility notes](docs/reproducibility.md) for additional context. Some historical documentation and files may describe an earlier, broader project scope; the scope stated in this README is the current scope.
+The source contract and field dictionary are shareable metadata; they do not
+authorise sharing other CRM files. Existing blanket CSV/JSON ignore rules can
+also hide new non-sensitive fixtures, so review each proposed exception rather
+than enabling all data files.
+
+Use [data sources](docs/data_sources.md), [CRM workflow](docs/CRM/README.md) and
+[reproduction instructions](docs/reproducibility.md) as the current guides. The
+sanitised inventory workbook may describe a broader historical data collection.

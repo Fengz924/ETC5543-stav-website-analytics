@@ -1,6 +1,9 @@
 # Consolidated CRM workflow
 
-The existing ETC5543 repository organisation is retained. The current approved analytical reports are `reports/CRM/01_crm_data_preparation.qmd` and `reports/CRM/02_crm_analysis_report.qmd`. Earlier CRM reports and datasets are historical reference material; they were not overwritten.
+The current analytical reports are `reports/CRM/01_crm_data_preparation.qmd`
+and `reports/CRM/02_crm_analysis_report.qmd`, for the 29 July 2026 snapshot.
+Records, matching candidates and recorded membership fields are not verified
+people, confirmed duplicates or authoritative current entitlements.
 
 ## Components
 
@@ -17,7 +20,11 @@ The existing ETC5543 repository organisation is retained. The current approved a
 | Source contract, field dictionary and method documentation | `docs/CRM/` |
 | Independent fuzzy-review source | `data/analysis/CRM/organisation_mapping/restricted/crm_school_name_fuzzy_candidates_review.csv` |
 
-The clean CSV is the primary Report 02 input; the RDS remains optional. The older repository clean datasets differ and remain untouched. The raw repository export was identical to the standalone source and was reused. Report 01 was identical and received only path/root adjustments; Report 02 retains the approved standalone analytical content with repository path/root adjustments. Existing organisation mapping outputs were preserved.
+The clean CSV is the primary Report 02 input; the RDS remains optional.
+Report 02 additionally reads the canonical source import for exact-duplicate
+checks and `organisation_master_mapping.csv` from
+`data/analysis/CRM/organisation_mapping/` for reviewed naming analysis.
+Historical datasets are not interchangeable with these inputs.
 
 ## Run from the repository root
 
@@ -27,10 +34,32 @@ quarto render reports/CRM/01_crm_data_preparation.qmd
 quarto render reports/CRM/02_crm_analysis_report.qmd
 ```
 
-The reports anchor execution using `here::i_am()`; no personal absolute working-folder path is required. Report 01 revalidates the source and prepares the dataset. Report 02 does not change contact data. Rendered HTML/support files are generated beside the reports and ignored by Git. The main Quarto configuration and default render list were not changed.
+Before rendering Report 02, ensure that the reviewed mapping outputs exist.
+To regenerate those outputs from the authorised reviewed input:
+
+```sh
+Rscript R/crm_organisation_master_mapping.R
+```
+
+The author developed the mapping; Catie provided manual review and feedback.
+The script processes that review into mapping tables; it does not alter the
+operational CRM. Do not rebuild it without the required reviewed input.
+
+The reports anchor execution using `here::i_am()`; no personal absolute
+working-folder path is required. Report 01 revalidates the source and writes
+prepared data. It invalidates previous final datasets and its success marker
+before a rerun, so it is not a read-only inspection. Report 02 does not edit
+contact records, but writes analysis summaries and figures. The root Quarto
+project configures `outputs/build/`; check Quarto's reported output path rather
+than assuming an older HTML beside the source has been updated. Generated HTML
+and support files are ignored. The default render list selects GA4, so request
+CRM reports explicitly.
 
 ## Privacy and exclusions
 
 All real CRM data under `data/` remains Git-ignored, including raw/clean/source/contact review and mapping inputs. Only the field dictionary and source contract have explicit CSV/JSON ignore exceptions in `docs/CRM/`; neither contains contact values. Aggregate figures contain no contact-level details. No data files were staged or committed.
 
-The standalone folder remains a backup. Its project configuration, RStudio project, temporary caches, duplicate raw/clean CSVs, old rendered reports and non-CRM content were not imported. Historic delivery manifests under the ignored validation directory are provenance records, not execution dependencies. The local consolidation inventory records individual copied/reused files.
+Historic delivery manifests and the consolidation inventory under the ignored
+validation directory are provenance records, not execution dependencies.
+See [reproduction instructions](../reproducibility.md) for dependencies and
+[data sources](../data_sources.md) for input contracts and access limitations.
