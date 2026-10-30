@@ -10,7 +10,8 @@ The project covers two data sources:
 - **Google Analytics 4 (GA4):** website traffic acquisition, content use, audience and device patterns, recorded interactions and tracking limitations.
 
 The Shiny dashboard and presentation communicate findings from these two workstreams.
-The individual final report is being rewritten and is not currently included.
+The [final report](reports/final/final_report.qmd) brings the CRM analysis, the GA4
+analysis and the dashboard together and is the main submitted deliverable.
 
 ## Analysis Periods
 
@@ -21,11 +22,23 @@ The CRM snapshot and GA4 reporting period describe different units and timeframe
 
 ## Main Deliverables
 
-- [CRM data preparation and validation](reports/CRM/01_crm_data_preparation.qmd)
-- [CRM analysis report](reports/CRM/02_crm_analysis_report.qmd)
-- [GA4 website analysis report](reports/GA4/stav_website_report.qmd)
-- [Interactive CRM and GA4 dashboard](apps/stav-dashboard/README.md)
-- [Presentation and build instructions](presentation/README.md)
+**Primary submission:** [Final report](reports/final/final_report.qmd) (Quarto, rendered to PDF with Typst).
+
+| Deliverable | What it is | Audience and role |
+|---|---|---|
+| [Final report](reports/final/final_report.qmd) | Integrated academic report combining the CRM audit, school-name matching, GA4 analysis and the dashboard, with research questions, methods, diagnostics, recommendations and limitations | **Main deliverable** for assessment; reads the outputs of the workstreams below |
+| [CRM data preparation and validation](reports/CRM/01_crm_data_preparation.qmd) | Report 01: validated import and preparation of the CRM export | Technical workstream; must run before the CRM analysis |
+| [CRM analysis report](reports/CRM/02_crm_analysis_report.qmd) | Report 02: detailed CRM findings for STAV, and the aggregate summaries used by the final report and dashboard | Supporting stakeholder report for STAV |
+| [GA4 website analysis report](reports/GA4/stav_website_report.qmd) | Detailed website findings for STAV (traffic, content, audience, events, measurement gaps) | Supporting stakeholder report for STAV |
+| [Interactive dashboard](apps/stav-dashboard/README.md) | Shiny app for exploring CRM summaries and GA4 exports with filters, monthly comparison and CSV export | Ongoing tool for STAV staff |
+| [Presentation](presentation/README.md) | Quarto slides and speaker notes | Oral presentation |
+
+The CRM and GA4 reports are detailed, stand-alone analyses written for STAV. The
+final report is the condensed, integrated version written for assessment: it
+frames the work around research questions, adds the matching-rule evaluation
+and missingness analysis, and connects the two data sources into one set of
+strategic recommendations. The dashboard is a tool rather than a report; the
+final report describes its design and functionality.
 
 ## Repository Structure
 
@@ -38,6 +51,7 @@ The CRM snapshot and GA4 reporting period describe different units and timeframe
 │   ├── CRM/                       # CRM preparation and validation
 │   └── ga4/                       # GA4 analysis script
 ├── reports/
+│   ├── final/                     # Final integrated report (main deliverable)
 │   ├── CRM/                       # Preparation and analysis reports
 │   ├── GA4/                       # Website analysis report
 │   └── figures/                   # Report figures
@@ -95,6 +109,24 @@ Rscript R/ga4/GA4_Web_Analytics.R
 ```
 
 The script and report retain separate analytical implementations; the report reads its own inputs rather than consuming an object produced by the script.
+
+### Final report
+
+Run after the CRM reports, because it reads the CRM summaries written by Report 02,
+the validated clean CRM file, the reviewed school-name candidate file and the
+GA4 exports:
+
+```sh
+quarto render reports/CRM/01_crm_data_preparation.qmd --to html
+quarto render reports/CRM/02_crm_analysis_report.qmd --to html
+quarto render reports/final/final_report.qmd
+```
+
+The report renders to `reports/final/final_report.pdf` using Typst, which is
+bundled with Quarto, so no LaTeX installation is needed. It additionally
+requires the `naniar` package for the missingness analysis. Bibliography
+entries are in `reports/final/references.bib`, and dashboard screenshots are in
+`reports/final/figures/`.
 
 ### Dashboard
 
